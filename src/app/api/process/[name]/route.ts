@@ -1,18 +1,18 @@
 import { procman } from "@/lib/procman";
 import { isProcName } from "@/lib/config";
-
-type Action = "start" | "stop" | "restart" | "kill-external" | "clear-logs";
+import { isProcAction } from "@/lib/shared";
 
 export async function POST(req: Request, ctx: RouteContext<"/api/process/[name]">) {
   const { name } = await ctx.params;
   if (!isProcName(name)) return Response.json({ error: "unknown process" }, { status: 404 });
 
-  const { action } = (await req.json().catch(() => ({}))) as { action?: Action };
+  const { action } = (await req.json().catch(() => ({}))) as { action?: unknown };
+  if (!isProcAction(action)) return Response.json({ error: "unknown action" }, { status: 400 });
   const proc = procman.get(name);
 
   switch (action) {
     case "start": {
-      const external = await procman.findExternal(name);
+      const external = await procman.findExternal(name, { fresh: true });
       if (external.length) {
         return Response.json(
           { error: `${name} is already running outside this app (pid ${external.join(", ")}). Stop it first.` },
@@ -34,8 +34,6 @@ export async function POST(req: Request, ctx: RouteContext<"/api/process/[name]"
     case "clear-logs":
       proc.clearLogs();
       break;
-    default:
-      return Response.json({ error: "unknown action" }, { status: 400 });
   }
   return Response.json({ ok: true });
 }

@@ -6,6 +6,9 @@ export type ProcName = "mediamtx" | "ffmpeg";
 export interface ProcSpec {
   name: ProcName;
   label: string;
+  /** Compact label for tabs and log headers. */
+  shortLabel: string;
+  description: string;
   bin: string;
   args: string[];
   env?: Record<string, string>;
@@ -27,10 +30,13 @@ export const MEDIAMTX_HLS = process.env.AV_MEDIAMTX_HLS ?? "http://127.0.0.1:888
 /** WebRTC port the browser connects to (on the same host that serves this app). */
 export const WEBRTC_PORT = Number(process.env.AV_WEBRTC_PORT ?? 8889);
 
+/** Declaration order is start order ("Start all"); "Stop all" goes in reverse. */
 export const PROCS: Record<ProcName, ProcSpec> = {
   mediamtx: {
     name: "mediamtx",
     label: "MediaMTX",
+    shortLabel: "MediaMTX",
+    description: "RTSP / RTMP / WebRTC media server",
     bin: MEDIAMTX_BIN,
     args: [process.env.AV_MEDIAMTX_CONFIG ?? "/etc/mediamtx/mediamtx.yml"],
     // Enable the control API (local only) so the panel can see which paths are live,
@@ -43,6 +49,8 @@ export const PROCS: Record<ProcName, ProcSpec> = {
   ffmpeg: {
     name: "ffmpeg",
     label: "FFmpeg (Opus for WebRTC)",
+    shortLabel: "FFmpeg",
+    description: "Re-encodes audio to Opus so the stream plays over WebRTC",
     bin: process.env.AV_FFMPEG_BIN ?? "ffmpeg",
     args: [
       "-hide_banner",
@@ -67,6 +75,19 @@ export const PROCS: Record<ProcName, ProcSpec> = {
 
 export const PROC_NAMES = Object.keys(PROCS) as ProcName[];
 
+/**
+ * Spawn children through `setpriv --pdeathsig` so the kernel stops them if this server
+ * dies without cleaning up (SIGKILL, crash). Set AV_PDEATHSIG=0 to disable.
+ */
+export const PDEATHSIG = process.env.AV_PDEATHSIG !== "0";
+
 export function isProcName(s: string): s is ProcName {
-  return s in PROCS;
+  return Object.hasOwn(PROCS, s);
 }
+
+// OBS runs on this host and is controlled over obs-websocket (Tools → WebSocket Server Settings).
+export const OBS_WS_URL = process.env.AV_OBS_WS_URL ?? "ws://127.0.0.1:4455";
+/** Falls back to the password stored in OBS's own websocket config when unset. */
+export const OBS_WS_PASSWORD = process.env.AV_OBS_WS_PASSWORD;
+export const OBS_CONFIG_DIR =
+  process.env.AV_OBS_CONFIG_DIR ?? `${process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`}/obs-studio`;

@@ -1,6 +1,7 @@
 import { procman } from "@/lib/procman";
 import { listPaths, probePathReady } from "@/lib/mediamtx";
 import { OUTPUT_PATH, INPUT_PATH, WEBRTC_PORT } from "@/lib/config";
+import type { StatusPayload } from "@/lib/shared";
 
 export async function GET() {
   const [processes, paths] = await Promise.all([procman.status(), listPaths()]);
@@ -21,5 +22,5 @@ export async function GET() {
     processes,
     paths,
     stream: { input: INPUT_PATH, output: OUTPUT_PATH, inputReady, outputReady, webrtcPort: WEBRTC_PORT },
-  });
+  } satisfies StatusPayload);
 }

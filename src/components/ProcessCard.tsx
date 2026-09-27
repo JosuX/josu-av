@@ -25,11 +25,6 @@ import { procAction, useNow, type ProcAction } from "./hooks";
 import { formatDuration } from "./format";
 import type { ProcStatus } from "./types";
 
-const DESCRIPTIONS: Record<ProcStatus["name"], string> = {
-  mediamtx: "RTSP / RTMP / WebRTC media server",
-  ffmpeg: "Re-encodes audio to Opus so the stream plays over WebRTC",
-};
-
 export function ProcessCard({ proc, onChange }: { proc: ProcStatus; onChange: () => void }) {
   const [busy, setBusy] = useState<ProcAction | null>(null);
   const [showCmd, setShowCmd] = useState(false);
@@ -53,7 +48,7 @@ export function ProcessCard({ proc, onChange }: { proc: ProcStatus; onChange: ()
     <Card className="flex flex-col">
       <CardHeader>
         <CardTitle>{proc.label}</CardTitle>
-        <CardDescription>{DESCRIPTIONS[proc.name]}</CardDescription>
+        <CardDescription>{proc.description}</CardDescription>
         <CardAction>
           <StateBadge state={displayState} />
         </CardAction>
@@ -64,9 +59,9 @@ export function ProcessCard({ proc, onChange }: { proc: ProcStatus; onChange: ()
           <Stat label="PID" value={proc.pid ?? (external ? proc.externalPids.join(", ") : "—")} />
           <Stat label="Uptime" value={proc.startedAt ? formatDuration(now - proc.startedAt) : "—"} />
           <Stat
-            label={proc.name === "ffmpeg" ? "Restarts" : "Last exit"}
+            label={proc.autoRestart ? "Restarts" : "Last exit"}
             value={
-              proc.name === "ffmpeg"
+              proc.autoRestart
                 ? proc.restarts
                 : proc.exitSignal ?? (proc.exitCode !== null ? `code ${proc.exitCode}` : "—")
             }

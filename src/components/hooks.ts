@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import type { ProcAction } from "@/lib/shared";
 import type { ProcName, StatusPayload } from "./types";
 
 export function useStatus(intervalMs = 2000) {
@@ -10,9 +11,7 @@ export function useStatus(intervalMs = 2000) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/status", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setStatus(await res.json());
+      setStatus(await fetchStatus());
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -31,7 +30,13 @@ export function useStatus(intervalMs = 2000) {
   return { status, error, refresh };
 }
 
-export type ProcAction = "start" | "stop" | "restart" | "kill-external" | "clear-logs";
+export type { ProcAction };
+
+export async function fetchStatus(): Promise<StatusPayload> {
+  const res = await fetch("/api/status", { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
 
 export async function procAction(name: ProcName, action: ProcAction): Promise<boolean> {
   try {

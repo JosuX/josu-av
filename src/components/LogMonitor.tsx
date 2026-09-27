@@ -9,7 +9,13 @@ import type { ProcName } from "./types";
 
 export type LogView = "split" | ProcName;
 
-export function LogMonitor({ initialView }: { initialView: LogView }) {
+export function LogMonitor({
+  procs,
+  initialView,
+}: {
+  procs: { name: ProcName; label: string }[];
+  initialView: LogView;
+}) {
   const router = useRouter();
   const [view, setView] = useState<LogView>(initialView);
 
@@ -18,6 +24,8 @@ export function LogMonitor({ initialView }: { initialView: LogView }) {
     setView(v as LogView);
     router.replace(v === "split" ? "/logs" : `/logs?view=${v}`, { scroll: false });
   };
+
+  const shown = view === "split" ? procs : procs.filter((p) => p.name === view);
 
   return (
     <div className="flex flex-col gap-4 lg:h-[calc(100dvh-3.5rem-3rem)] lg:min-h-[480px]">
@@ -28,20 +36,25 @@ export function LogMonitor({ initialView }: { initialView: LogView }) {
         </div>
         <ToggleGroup type="single" variant="outline" size="sm" value={view} onValueChange={change} className="w-full sm:w-auto [&>*]:flex-1">
           <ToggleGroupItem value="split" aria-label="Split view">
-            <Columns2 /> Both
+            <Columns2 /> {procs.length === 2 ? "Both" : "All"}
           </ToggleGroupItem>
-          <ToggleGroupItem value="mediamtx">
-            <Square /> MediaMTX
-          </ToggleGroupItem>
-          <ToggleGroupItem value="ffmpeg">
-            <Square /> FFmpeg
-          </ToggleGroupItem>
+          {procs.map((p) => (
+            <ToggleGroupItem key={p.name} value={p.name}>
+              <Square /> {p.label}
+            </ToggleGroupItem>
+          ))}
         </ToggleGroup>
       </div>
 
       <div className={view === "split" ? "grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-2" : "flex lg:min-h-0 lg:flex-1"}>
-        {(view === "split" || view === "mediamtx") && <LogConsole name="mediamtx" className="h-[calc(100dvh-13rem)] min-h-[320px] flex-1 lg:h-auto" />}
-        {(view === "split" || view === "ffmpeg") && <LogConsole name="ffmpeg" className="h-[calc(100dvh-13rem)] min-h-[320px] flex-1 lg:h-auto" />}
+        {shown.map((p) => (
+          <LogConsole
+            key={p.name}
+            name={p.name}
+            label={p.label}
+            className="h-[calc(100dvh-13rem)] min-h-[320px] flex-1 lg:h-auto"
+          />
+        ))}
       </div>
     </div>
   );

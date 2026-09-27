@@ -1,6 +1,7 @@
 import "server-only";
 import { readFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
+import { STATS_HISTORY } from "./shared";
 
 export interface StatSample {
   ts: number;
@@ -13,11 +14,9 @@ export interface StatSample {
 }
 
 const INTERVAL_MS = 1000;
-const HISTORY = 300; // 5 minutes
 
-/** Interface carrying the default route, from /proc/net/route. */
-async function defaultIface(): Promise<string | null> {
-  const txt = await readFile("/proc/net/route", "utf8");
+/** Interface carrying the default route, from the contents of /proc/net/route. */
+export function parseDefaultIface(txt: string): string | null {
   let best: { iface: string; metric: number } | null = null;
   for (const line of txt.split("\n").slice(1)) {
     const f = line.trim().split(/\s+/);
@@ -28,8 +27,8 @@ async function defaultIface(): Promise<string | null> {
   return best?.iface ?? null;
 }
 
-async function netBytes(iface: string): Promise<{ rx: number; tx: number } | null> {
-  const txt = await readFile("/proc/net/dev", "utf8");
+/** Byte counters for `iface`, from the contents of /proc/net/dev. */
+export function parseNetDev(txt: string, iface: string): { rx: number; tx: number } | null {
   for (const line of txt.split("\n")) {
     const [name, rest] = line.split(":");
     if (name?.trim() !== iface || !rest) continue;
@@ -39,8 +38,8 @@ async function netBytes(iface: string): Promise<{ rx: number; tx: number } | nul
   return null;
 }
 
-async function memInfo() {
-  const txt = await readFile("/proc/meminfo", "utf8");
+/** Total and used (total − available) bytes, from the contents of /proc/meminfo. */
+export function parseMeminfo(txt: string) {
   const kb = (key: string) => Number(new RegExp(`^${key}:\\s+(\\d+)`, "m").exec(txt)?.[1] ?? 0) * 1024;
   const total = kb("MemTotal");
   return { total, used: total - kb("MemAvailable") };
@@ -65,8 +64,15 @@ class StatsSampler extends EventEmitter {
 
   private async tick() {
     try {
-      const iface = (await defaultIface()) ?? "lo";
-      const [net, mem] = await Promise.all([netBytes(iface), memInfo()]);
+      // Literal paths: a computed path makes Turbopack trace the whole project.
+      const [route, dev, meminfo] = await Promise.all([
+        readFile("/proc/net/route", "utf8"),
+        readFile("/proc/net/dev", "utf8"),
+        readFile("/proc/meminfo", "utf8"),
+      ]);
+      const iface = parseDefaultIface(route) ?? "lo";
+      const net = parseNetDev(dev, iface);
+      const mem = parseMeminfo(meminfo);
       const now = Date.now();
       if (!net) return;
       const prev = this.prev;
@@ -82,7 +88,7 @@ class StatsSampler extends EventEmitter {
         memTotal: mem.total,
       };
       this.history.push(sample);
-      if (this.history.length > HISTORY) this.history.shift();
+      if (this.history.length > STATS_HISTORY) this.history.shift();
       this.emit("sample", sample);
     } catch (e) {
       console.error("stats sample failed", e);

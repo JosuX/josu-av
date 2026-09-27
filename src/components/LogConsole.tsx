@@ -10,12 +10,10 @@ import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { LOG_MAX_LINES } from "@/lib/shared";
 import { StateBadge } from "./StateBadge";
 import { procAction } from "./hooks";
 import type { LogLine, ProcName, ProcState } from "./types";
-
-const MAX_LINES = 3000;
-const LABELS: Record<ProcName, string> = { mediamtx: "MediaMTX", ffmpeg: "FFmpeg" };
 
 type Level = "error" | "warn" | "info" | "progress" | "system";
 
@@ -36,10 +34,16 @@ const LEVEL_CLASS: Record<Level, string> = {
   system: "text-log-system font-medium",
 };
 
+type Line = LogLine & { level: Level };
+
+const withLevel = (l: LogLine): Line => ({ ...l, level: levelOf(l) });
+const isIssue = (l: Line) => l.level === "error" || l.level === "warn";
+
 type Filter = "all" | "issues";
 
-export function LogConsole({ name, className }: { name: ProcName; className?: string }) {
-  const [lines, setLines] = useState<LogLine[]>([]);
+export function LogConsole({ name, label, className }: { name: ProcName; label: string; className?: string }) {
+  // Levels are classified once per line on arrival, not on every render.
+  const [lines, setLines] = useState<Line[]>([]);
   const [state, setState] = useState<ProcState>("stopped");
   const [connected, setConnected] = useState(false);
   const [query, setQuery] = useState("");
@@ -52,10 +56,10 @@ export function LogConsole({ name, className }: { name: ProcName; className?: st
     const es = new EventSource(`/api/logs/${name}`);
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
-    es.addEventListener("backlog", (e) => setLines(JSON.parse((e as MessageEvent).data)));
+    es.addEventListener("backlog", (e) => setLines((JSON.parse((e as MessageEvent).data) as LogLine[]).map(withLevel)));
     es.addEventListener("line", (e) => {
-      const l = JSON.parse((e as MessageEvent).data) as LogLine;
-      setLines((prev) => (prev.length >= MAX_LINES ? [...prev.slice(-(MAX_LINES - 1)), l] : [...prev, l]));
+      const l = withLevel(JSON.parse((e as MessageEvent).data) as LogLine);
+      setLines((prev) => (prev.length >= LOG_MAX_LINES ? [...prev.slice(-(LOG_MAX_LINES - 1)), l] : [...prev, l]));
     });
     es.addEventListener("state", (e) => setState(JSON.parse((e as MessageEvent).data)));
     es.addEventListener("clear", () => setLines([]));
@@ -65,15 +69,11 @@ export function LogConsole({ name, className }: { name: ProcName; className?: st
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return lines
-      .map((l) => ({ ...l, level: levelOf(l) }))
-      .filter((l) => (filter === "issues" ? l.level === "error" || l.level === "warn" || l.level === "system" : true))
+      .filter((l) => (filter === "issues" ? isIssue(l) || l.level === "system" : true))
       .filter((l) => (q ? l.text.toLowerCase().includes(q) : true));
   }, [lines, query, filter]);
 
-  const issues = useMemo(() => lines.filter((l) => {
-    const lv = levelOf(l);
-    return lv === "error" || lv === "warn";
-  }).length, [lines]);
+  const issues = useMemo(() => lines.filter(isIssue).length, [lines]);
 
   useEffect(() => {
     if (follow && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -101,7 +101,7 @@ export function LogConsole({ name, className }: { name: ProcName; className?: st
     <Card className={cn("flex min-h-0 flex-col gap-0 py-0", className)}>
       <CardHeader className="border-b py-3!">
         <CardTitle className="flex items-center gap-2">
-          {LABELS[name]}
+          {label}
           <StateBadge state={state} />
           {!connected && <span className="text-xs font-normal text-muted-foreground">reconnecting…</span>}
         </CardTitle>

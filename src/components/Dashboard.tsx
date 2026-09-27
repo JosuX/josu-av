@@ -8,7 +8,29 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ProcessCard } from "./ProcessCard";
 import { StreamCard } from "./StreamCard";
 import { SystemCharts } from "./SystemCharts";
-import { procAction, useStatus } from "./hooks";
+import { fetchStatus, procAction, useStatus } from "./hooks";
+import type { ProcName, StatusPayload } from "./types";
+
+const READY_TIMEOUT_MS = 5000;
+
+/**
+ * Whether `name` is up far enough for the next process to use it. For MediaMTX that is
+ * its control API answering (paths !== null), which happens once it is listening.
+ */
+function isReady(s: StatusPayload, name: ProcName) {
+  const p = s.processes.find((x) => x.name === name);
+  if (p?.state !== "running") return false;
+  return name !== "mediamtx" || s.paths !== null;
+}
+
+async function waitUntilReady(name: ProcName) {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const s = await fetchStatus().catch(() => null);
+    if (s && isReady(s, name)) return;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
 
 export function Dashboard() {
   const { status, error, refresh } = useStatus();
@@ -18,15 +40,15 @@ export function Dashboard() {
   const anyActive = procs.some((p) => p.state !== "stopped" && p.state !== "crashed");
   const anyExternal = procs.some((p) => p.externalPids.length > 0);
 
+  // The server lists processes in dependency order (MediaMTX before FFmpeg).
   const startAll = async () => {
     setBulk("start");
-    // MediaMTX first so FFmpeg has something to connect to.
-    for (const name of ["mediamtx", "ffmpeg"] as const) {
-      const p = procs.find((x) => x.name === name);
-      if (p && (p.state === "stopped" || p.state === "crashed")) {
-        if (!(await procAction(name, "start"))) break;
-        if (name === "mediamtx") await new Promise((r) => setTimeout(r, 1000));
+    for (const [i, p] of procs.entries()) {
+      if (p.state === "stopped" || p.state === "crashed") {
+        if (!(await procAction(p.name, "start"))) break;
       }
+      // Give the next process something to connect to.
+      if (i < procs.length - 1) await waitUntilReady(p.name);
     }
     setBulk(null);
     void refresh();
@@ -34,8 +56,7 @@ export function Dashboard() {
 
   const stopAll = async () => {
     setBulk("stop");
-    await procAction("ffmpeg", "stop");
-    await procAction("mediamtx", "stop");
+    for (const p of procs.toReversed()) await procAction(p.name, "stop");
     setBulk(null);
     void refresh();
   };

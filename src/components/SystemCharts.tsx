@@ -13,9 +13,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { formatBits, formatBytes, formatClock } from "./format";
+import { STATS_HISTORY } from "@/lib/shared";
 import type { StatSample } from "./types";
 
-const HISTORY = 300;
 const GiB = 1024 ** 3;
 
 /** Round GiB ticks (e.g. 0, 8, 16, 24, 32) spanning the machine's total memory. */
@@ -33,7 +33,7 @@ function useStatsStream() {
     es.addEventListener("history", (e) => setSamples(JSON.parse((e as MessageEvent).data)));
     es.addEventListener("sample", (e) => {
       const s = JSON.parse((e as MessageEvent).data) as StatSample;
-      setSamples((prev) => [...prev.slice(-(HISTORY - 1)), s]);
+      setSamples((prev) => [...prev.slice(-(STATS_HISTORY - 1)), s]);
     });
     return () => es.close();
   }, []);

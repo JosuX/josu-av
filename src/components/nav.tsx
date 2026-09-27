@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, RadioTower, ScrollText } from "lucide-react";
+import { LayoutDashboard, RadioTower, ScrollText, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme";
 
 const LINKS = [
   { href: "/", label: "Dashboard", short: "Dashboard", icon: LayoutDashboard },
   { href: "/logs", label: "Log monitor", short: "Logs", icon: ScrollText },
+  { href: "/settings", label: "Settings", short: "Settings", icon: Settings },
 ];
 
 export function Nav() {
@@ -44,7 +45,7 @@ export function Nav() {
       </header>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-2 border-t bg-background/90 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t bg-background/90 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
         aria-label="Primary"
       >
         {LINKS.map(({ href, short, icon: Icon }) => (

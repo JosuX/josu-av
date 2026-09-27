@@ -1,7 +1,8 @@
 import "server-only";
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { PROCS, PROC_NAMES, type ProcName } from "./config";
+import { PDEATHSIG, PROCS, PROC_NAMES, type ProcName, type ProcSpec } from "./config";
+import { LOG_MAX_LINES } from "./shared";
 
 export type LogStream = "stdout" | "stderr" | "system";
 
@@ -17,6 +18,9 @@ export type ProcState = "stopped" | "starting" | "running" | "stopping" | "resta
 export interface ProcStatus {
   name: ProcName;
   label: string;
+  shortLabel: string;
+  description: string;
+  autoRestart: boolean;
   state: ProcState;
   pid: number | null;
   startedAt: number | null;
@@ -27,11 +31,41 @@ export interface ProcStatus {
   externalPids: number[];
 }
 
-const MAX_LINES = 3000;
 const RESTART_DELAY_MS = 3000;
 const KILL_TIMEOUT_MS = 5000;
+/** How long a pgrep result is reused; status is polled by every open dashboard. */
+const EXTERNAL_CACHE_MS = 1000;
 
-class ManagedProcess extends EventEmitter {
+/**
+ * Split a chunk of output into complete lines, carrying the unterminated tail over.
+ * ffmpeg rewrites its progress line with \r, so that counts as a line break too.
+ */
+export function splitLines(partial: string, chunk: string): { lines: string[]; rest: string } {
+  const parts = (partial + chunk).split(/\r\n|\r|\n/);
+  const rest = parts.pop() ?? "";
+  return { lines: parts.filter((p) => p.trim()), rest };
+}
+
+let setprivAvailable: boolean | undefined;
+
+/** The argv to spawn, wrapped so the kernel stops the child if this server dies. */
+function spawnArgv(spec: ProcSpec): [string, string[]] {
+  if (PDEATHSIG) {
+    if (setprivAvailable === undefined) {
+      try {
+        execFileSync("setpriv", ["--version"], { stdio: "ignore" });
+        setprivAvailable = true;
+      } catch {
+        setprivAvailable = false;
+      }
+    }
+    // setpriv execs the target, so the pid and command line are the target's own.
+    if (setprivAvailable) return ["setpriv", ["--pdeathsig", "TERM", "--", spec.bin, ...spec.args]];
+  }
+  return [spec.bin, spec.args];
+}
+
+export class ManagedProcess extends EventEmitter {
   child: ChildProcess | null = null;
   state: ProcState = "stopped";
   startedAt: number | null = null;
@@ -44,19 +78,22 @@ class ManagedProcess extends EventEmitter {
   private restartTimer: NodeJS.Timeout | null = null;
   private partial: Record<"stdout" | "stderr", string> = { stdout: "", stderr: "" };
 
-  constructor(readonly name: ProcName) {
+  constructor(
+    readonly spec: ProcSpec,
+    private readonly restartDelayMs = RESTART_DELAY_MS,
+  ) {
     super();
     this.setMaxListeners(100);
   }
 
-  get spec() {
-    return PROCS[this.name];
+  get name() {
+    return this.spec.name;
   }
 
   log(stream: LogStream, text: string) {
     const line: LogLine = { id: ++this.seq, ts: Date.now(), stream, text };
     this.lines.push(line);
-    if (this.lines.length > MAX_LINES) this.lines.splice(0, this.lines.length - MAX_LINES);
+    if (this.lines.length > LOG_MAX_LINES) this.lines.splice(0, this.lines.length - LOG_MAX_LINES);
     this.emit("line", line);
   }
 
@@ -71,10 +108,9 @@ class ManagedProcess extends EventEmitter {
   }
 
   private onData(stream: "stdout" | "stderr", chunk: Buffer) {
-    // ffmpeg rewrites its progress line with \r, so treat it as a line break too.
-    const parts = (this.partial[stream] + chunk.toString("utf8")).split(/\r\n|\r|\n/);
-    this.partial[stream] = parts.pop() ?? "";
-    for (const p of parts) if (p.trim()) this.log(stream, p);
+    const { lines, rest } = splitLines(this.partial[stream], chunk.toString("utf8"));
+    this.partial[stream] = rest;
+    for (const l of lines) this.log(stream, l);
   }
 
   start() {
@@ -94,7 +130,7 @@ class ManagedProcess extends EventEmitter {
     this.exitCode = null;
     this.exitSignal = null;
 
-    const child = spawn(bin, args, {
+    const child = spawn(...spawnArgv(this.spec), {
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -124,11 +160,11 @@ class ManagedProcess extends EventEmitter {
       if (this.wantRunning && this.spec.autoRestart) {
         this.restarts++;
         this.setState("restarting");
-        this.log("system", `restarting in ${RESTART_DELAY_MS / 1000}s…`);
+        this.log("system", `restarting in ${this.restartDelayMs / 1000}s…`);
         this.restartTimer = setTimeout(() => {
           this.restartTimer = null;
           if (this.wantRunning) this.spawnChild();
-        }, RESTART_DELAY_MS);
+        }, this.restartDelayMs);
       } else {
         const clean = !this.wantRunning || code === 0;
         this.wantRunning = false;
@@ -170,38 +206,48 @@ class ManagedProcess extends EventEmitter {
 
 class ProcessManager {
   readonly procs: Record<ProcName, ManagedProcess>;
+  private pgrepCache = new Map<ProcName, { at: number; pids: Promise<number[]> }>();
 
   constructor() {
-    this.procs = Object.fromEntries(PROC_NAMES.map((n) => [n, new ManagedProcess(n)])) as Record<
+    this.procs = Object.fromEntries(PROC_NAMES.map((n) => [n, new ManagedProcess(PROCS[n])])) as Record<
       ProcName,
       ManagedProcess
     >;
+    // Next turns SIGINT/SIGTERM into process.exit(), so this covers graceful shutdowns;
+    // the pdeathsig wrapper covers the server being killed outright.
     const shutdown = () => {
       for (const p of Object.values(this.procs)) p.child?.kill("SIGTERM");
     };
     process.once("exit", shutdown);
+    for (const p of Object.values(this.procs)) p.on("state", () => this.pgrepCache.delete(p.name));
   }
 
   get(name: ProcName) {
     return this.procs[name];
   }
 
-  /** Instances matching the process pattern that this app did not spawn. */
-  findExternal(name: ProcName): Promise<number[]> {
-    const own = this.procs[name].child?.pid;
-    return new Promise((resolve) => {
+  private pgrep(name: ProcName): Promise<number[]> {
+    const cached = this.pgrepCache.get(name);
+    if (cached && Date.now() - cached.at < EXTERNAL_CACHE_MS) return cached.pids;
+    const pids = new Promise<number[]>((resolve) => {
       execFile("pgrep", ["-f", PROCS[name].externalPattern], (_err, stdout) => {
-        const pids = stdout
-          .split("\n")
-          .map((s) => Number(s.trim()))
-          .filter((pid) => pid && pid !== own && pid !== process.pid);
-        resolve(pids);
+        resolve(stdout.split("\n").map((s) => Number(s.trim())).filter(Boolean));
       });
     });
+    this.pgrepCache.set(name, { at: Date.now(), pids });
+    return pids;
+  }
+
+  /** Instances matching the process pattern that this app did not spawn. */
+  async findExternal(name: ProcName, { fresh = false } = {}): Promise<number[]> {
+    if (fresh) this.pgrepCache.delete(name);
+    const pids = await this.pgrep(name);
+    const own = this.procs[name].child?.pid;
+    return pids.filter((pid) => pid !== own && pid !== process.pid);
   }
 
   async killExternal(name: ProcName) {
-    const pids = await this.findExternal(name);
+    const pids = await this.findExternal(name, { fresh: true });
     for (const pid of pids) {
       try {
         process.kill(pid, PROCS[name].stopSignal);
@@ -210,6 +256,7 @@ class ProcessManager {
         this.procs[name].log("system", `could not signal external pid ${pid}: ${(e as Error).message}`);
       }
     }
+    this.pgrepCache.delete(name);
     return pids;
   }
 
@@ -220,6 +267,9 @@ class ProcessManager {
         return {
           name,
           label: p.spec.label,
+          shortLabel: p.spec.shortLabel,
+          description: p.spec.description,
+          autoRestart: p.spec.autoRestart,
           state: p.state,
           pid: p.child?.pid ?? null,
           startedAt: p.startedAt,
