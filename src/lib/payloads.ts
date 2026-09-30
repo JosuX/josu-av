@@ -1,7 +1,7 @@
 import "server-only";
-import { networkInterfaces } from "node:os";
 import { INGEST, INPUT_PATH, OUTPUT_PATH, VIEWER_PORT, WEBRTC_PORT, WHIP_URL } from "./config";
 import { listPaths, probePathReady } from "./mediamtx";
+import { lanInterface } from "./net";
 import {
   getEncoder,
   getStreamService,
@@ -17,17 +17,9 @@ import type { StatusPayload, WatchPayload } from "./shared";
 
 // What the API routes return, shared with the live push (live.ts) so both send the same thing.
 
-/** Virtual interfaces (containers, VPNs) whose addresses other LAN devices can't reach. */
-const VIRTUAL_IFACE = /^(lo|docker|br-|veth|virbr|vmnet|tailscale|tun|tap|wg|wt|zt)/;
-
-/** The first IPv4 address on a physical interface, e.g. 192.168.1.25. */
+/** The LAN address other devices can open, e.g. 192.168.1.25. */
 export function lanHost(): string | null {
-  for (const [name, addrs] of Object.entries(networkInterfaces())) {
-    if (VIRTUAL_IFACE.test(name)) continue;
-    const a = addrs?.find((x) => x.family === "IPv4" && !x.internal);
-    if (a) return a.address;
-  }
-  return null;
+  return lanInterface()?.address ?? null;
 }
 
 const RATE_WINDOW_MS = 10_000;

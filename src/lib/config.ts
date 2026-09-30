@@ -2,6 +2,8 @@
 //   whip (default): OBS --WHIP (H.264 + Opus)--> mediamtx /assembly --WHEP--> browser
 //   rtmp:           OBS --rtmp--> mediamtx /assembly --ffmpeg (AAC -> Opus)--> /assembly-webrtc --WHEP--> browser
 
+import { lanInterface } from "./net";
+
 export type ProcName = "mediamtx" | "ffmpeg";
 
 export interface ProcSpec {
@@ -46,6 +48,14 @@ export function apiListenAddress(url: string) {
 export const MEDIAMTX_HLS = process.env.AV_MEDIAMTX_HLS ?? "http://127.0.0.1:8888";
 /** WebRTC port the browser connects to (on the same host that serves this app). */
 export const WEBRTC_PORT = Number(process.env.AV_WEBRTC_PORT ?? 8889);
+/**
+ * Interfaces MediaMTX offers for WebRTC (comma-separated). Left to itself it offers every one,
+ * including Docker bridges and VPNs, and a connection can then pick an address that doesn't
+ * work and fail to come up (seen with OBS's WHIP). Default: this machine's LAN interface.
+ * AV_WEBRTC_INTERFACES="" offers them all again.
+ */
+export const WEBRTC_INTERFACES = process.env.AV_WEBRTC_INTERFACES ?? lanInterface()?.name ?? "";
+
 /** Where OBS publishes in WHIP mode (OBS runs on this host). */
 export const WHIP_URL = `http://127.0.0.1:${WEBRTC_PORT}/${INPUT_PATH}/whip`;
 
@@ -61,7 +71,11 @@ export const PROCS: Record<ProcName, ProcSpec> = {
     // Enable the control API (local only) so the panel can see which paths are live,
     // without editing the root-owned config file.
     // The address comes from AV_MEDIAMTX_API so the panel polls the port MediaMTX listens on.
-    env: { MTX_API: "yes", MTX_APIADDRESS: apiListenAddress(MEDIAMTX_API) },
+    env: {
+      MTX_API: "yes",
+      MTX_APIADDRESS: apiListenAddress(MEDIAMTX_API),
+      ...(WEBRTC_INTERFACES && { MTX_WEBRTCIPSFROMINTERFACESLIST: WEBRTC_INTERFACES }),
+    },
     stopSignal: "SIGTERM",
     // A crashed MediaMTX takes the feed down; bring it back, but stop if it keeps crashing
     // (e.g. a bad config or a port in use), where retrying cannot help.

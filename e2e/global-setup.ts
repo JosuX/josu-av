@@ -3,6 +3,7 @@ import { mkdirSync, openSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { E2E } from "./env";
+import { lanInterface } from "../src/lib/net";
 
 // A MediaMTX of its own with a synthetic stream (test pattern + tone, H.264 + Opus) on the
 // panel's path, so the tests exercise real WebRTC playback without OBS.
@@ -24,9 +25,9 @@ async function waitForStream(timeoutMs: number) {
  * Output goes to a file in the temp dir (av-e2e-<name>.log), to diagnose a failed run; an unread
  * pipe could also fill up and block the process.
  */
-function run(bin: string, args: string[]): ChildProcess {
+function run(bin: string, args: string[], env: Record<string, string> = {}): ChildProcess {
   const out = openSync(path.join(tmpdir(), `av-e2e-${path.basename(bin)}.log`), "w");
-  const child = spawn(bin, args, { stdio: ["ignore", out, out] });
+  const child = spawn(bin, args, { stdio: ["ignore", out, out], env: { ...process.env, ...env } });
   child.on("error", (e) => console.error(`[e2e] could not start ${bin}: ${e.message}`));
   return child;
 }
@@ -43,7 +44,13 @@ export default async function globalSetup() {
   mkdirSync(binDir);
   const real = execFileSync("sh", ["-c", "command -v mediamtx"], { encoding: "utf8" }).trim();
   symlinkSync(real, path.join(binDir, "mediamtx-e2e"));
-  const mediamtx = run(path.join(binDir, "mediamtx-e2e"), [path.join(process.cwd(), "e2e", "fixtures", "mediamtx.yml")]);
+  // Offer only the LAN interface for WebRTC, as the panel does for its own MediaMTX.
+  const iface = lanInterface()?.name;
+  const mediamtx = run(
+    path.join(binDir, "mediamtx-e2e"),
+    [path.join(process.cwd(), "e2e", "fixtures", "mediamtx.yml")],
+    iface ? { MTX_WEBRTCIPSFROMINTERFACESLIST: iface } : {},
+  );
   await new Promise((r) => setTimeout(r, 1000));
   const ffmpeg = run("ffmpeg", [
     ...["-hide_banner", "-loglevel", "error", "-re"],

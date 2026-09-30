@@ -2,7 +2,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { OBS_CONFIG_DIR, OBS_WS_PASSWORD, OBS_WS_URL, WHIP_URL } from "./config";
+import { INPUT_PATH, OBS_CONFIG_DIR, OBS_WS_PASSWORD, OBS_WS_URL, WHIP_URL } from "./config";
+import { listPaths } from "./mediamtx";
 import { X264_PRESETS, type Fps, type OutputPatch } from "./shared";
 
 // Minimal obs-websocket v5 client. One connection is opened on first use and shared by
@@ -464,8 +465,43 @@ interface ObsState {
 }
 
 const START_RETRY_DELAY_MS = 2000;
+/**
+ * How long a started stream gets to actually reach MediaMTX. OBS calls its output active while
+ * the WebRTC connection is still being set up, and one that never comes up stays "active" for
+ * about 35 s before OBS gives up, with no video getting through.
+ */
+const INGEST_TIMEOUT_MS = 15_000;
 
-/** Start the stream, retrying once, and remember a failure so the UI can say the stream is off. */
+/** OBS says it's streaming, but MediaMTX isn't receiving anything. */
+class IngestError extends ObsError {}
+
+/**
+ * Whether MediaMTX is receiving OBS's stream (the path OBS publishes to is ready), or null when
+ * MediaMTX's API can't say. Replaceable for tests.
+ */
+export const ingest = {
+  ready: async (): Promise<boolean | null> => {
+    const paths = await listPaths();
+    return paths ? paths.some((p) => p.name === INPUT_PATH && p.ready) : null;
+  },
+  pollMs: 500,
+};
+
+async function waitForIngest(timeoutMs = INGEST_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const ready = await ingest.ready();
+    if (ready !== false) return; // receiving, or no way to check
+    if (Date.now() >= deadline)
+      throw new IngestError(`OBS started streaming but MediaMTX received nothing within ${timeoutMs / 1000}s`);
+    await new Promise((r) => setTimeout(r, ingest.pollMs));
+  }
+}
+
+/**
+ * Start the stream and wait until MediaMTX actually receives it, retrying once; remember a
+ * failure so the UI can say the stream is off.
+ */
 async function startStream(obs: ObsSession) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -476,10 +512,17 @@ async function startStream(obs: ObsSession) {
         await obs.call("StartStream");
         await waitForStream(obs, true);
       }
+      await waitForIngest();
       state.stoppedByPanel = null;
       return;
     } catch (e) {
       lastError = e;
+      // An output stuck "active" without delivering anything has to be stopped, or the retry
+      // would take it for a running stream.
+      if (e instanceof IngestError) {
+        await obs.call("StopStream").catch(() => {});
+        await waitForStream(obs, false).catch(() => {});
+      }
     }
   }
   const reason = (lastError as Error).message;

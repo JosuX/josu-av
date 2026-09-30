@@ -102,6 +102,7 @@ variables:
 | `AV_OBS_BIN` | `obs` | OBS binary, for **Launch OBS** |
 | `AV_OBS_ARGS` | *(none)* | Extra OBS arguments when the panel launches it, e.g. `--minimize-to-tray` |
 | `AV_OBS_PROCESS` | *(binary name)* | Process name used to tell whether OBS is running (`pgrep -x`) |
+| `AV_WEBRTC_INTERFACES` | *(the LAN interface, e.g. `wlo1`)* | Interfaces MediaMTX offers for WebRTC when the panel starts it (comma-separated; empty offers all) |
 | `AV_VIEWER_PORT` | `8080` | Port serving only the viewer page; `0` turns it off |
 | `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` | Where the automation switches are saved (`automation.json`), and the files shared with the OBS live-bitrate script |
 
@@ -120,6 +121,9 @@ The commands themselves are defined in `src/lib/config.ts`.
   3 s and doubling up to 30 s; after 6 crashes in a row (each within 30 s of starting) it gives up
   and the dashboard says so. FFmpeg restarts every 3 s after it exits, because it exits whenever
   OBS stops publishing. Neither is restarted if its binary can't be started at all.
+- **WebRTC interfaces.** Left to itself MediaMTX offers every interface for WebRTC, Docker
+  bridges and VPNs included. The panel starts it with only the LAN interface
+  (`AV_WEBRTC_INTERFACES`), so fewer addresses get tried when a connection is set up.
 - **Player.** The dashboard's WebRTC player sends its offer after at most 250 ms of ICE
   gathering, asks the browser for no extra playout buffering, rides out brief network drops
   for 2 s, and otherwise reconnects with a backoff from 0.5 s up to 5 s.
@@ -136,7 +140,10 @@ The commands themselves are defined in `src/lib/config.ts`.
   that file when its own Settings dialog is saved, which can undo the change; the panel reports
   when that happens. The "Encoding at" figure comes from the latest OBS log.
 - **Stream restarts.** Applying a bitrate, restarting, or switching to WHIP stops OBS's stream
-  and starts it again. If the start fails, the panel retries once after 2 s; if that fails too,
+  and starts it again. A start only counts once MediaMTX is receiving the stream: OBS calls its
+  output active while the WebRTC connection is still being set up, and one that never comes up
+  sends nothing for about 35 s. After 15 s without the stream arriving, the panel stops OBS's
+  output and retries. If the start fails, the panel retries once after 2 s; if that fails too,
   the Settings page shows **The stream is OFF** with a button to start it. Switching to WHIP
   restarts the stream even when OBS rejects the new service settings.
 

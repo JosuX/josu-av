@@ -3,6 +3,7 @@ import {
   ObsBusyError,
   ObsError,
   encoderCodec,
+  ingest,
   parseEffectiveBitrate,
   parseEncoderStarts,
   applyOutput,
@@ -91,6 +92,15 @@ function fakeObs({ active = true, startFailures = 0, serviceFails = false } = {}
 
 const live = { active: true, reconnecting: false, durationMs: 0, bytes: 0, congestion: 0, skippedFrames: 0, totalFrames: 0 };
 const off = { ...live, active: false };
+
+// Never ask a real MediaMTX: by default the stream counts as received as soon as OBS starts.
+const realIngestReady = ingest.ready;
+beforeEach(() => {
+  ingest.ready = async () => true;
+});
+afterEach(() => {
+  ingest.ready = realIngestReady;
+});
 
 describe("restartStream", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -183,5 +193,49 @@ describe("applyOutput", () => {
     expect(await applyOutput(obs, { fps: { num: 30, den: 1 } })).toBe(false);
     expect(isActive()).toBe(false);
     expect(calls).not.toContain("StartStream");
+  });
+});
+
+describe("restartStream waits for MediaMTX to receive the stream", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    stoppedByPanel(live);
+  });
+
+  it("stops a start that never reaches MediaMTX and retries it", async () => {
+    const { obs, calls, isActive } = fakeObs();
+    // Nothing arrives for the first attempt; the retry's stream does.
+    let starts = 0;
+    const call = obs.call.bind(obs);
+    obs.call = (async (type: string, data?: Record<string, unknown>) => {
+      if (type === "StartStream") starts++;
+      return call(type, data);
+    }) as ObsSession["call"];
+    ingest.ready = async () => starts >= 2;
+
+    const done = restartStream(obs);
+    await vi.runAllTimersAsync();
+    await done;
+    expect(isActive()).toBe(true);
+    expect(calls.filter((c) => c !== "GetStreamStatus")).toEqual(["StopStream", "StartStream", "StopStream", "StartStream"]);
+    expect(stoppedByPanel(off)).toBeNull();
+  });
+
+  it("reports the stream as off when MediaMTX never receives it", async () => {
+    const { obs, isActive } = fakeObs();
+    ingest.ready = async () => false;
+    const done = expect(restartStream(obs)).rejects.toThrow(/stream is OFF.*MediaMTX received nothing/);
+    await vi.runAllTimersAsync();
+    await done;
+    // The stuck output isn't left running as if all were well.
+    expect(isActive()).toBe(false);
+  });
+
+  it("doesn't wait when MediaMTX can't be asked", async () => {
+    const { obs, isActive } = fakeObs();
+    ingest.ready = async () => null;
+    await restartStream(obs);
+    expect(isActive()).toBe(true);
   });
 });
