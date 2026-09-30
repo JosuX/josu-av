@@ -1,9 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme";
-import { Nav } from "@/components/nav";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -40,15 +38,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="flex min-h-full flex-col antialiased">
         <ThemeProvider>
-          <TooltipProvider>
-            <Nav />
-            <main className="mx-auto w-full max-w-[120rem] flex-1 px-3 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-6">{children}</main>
-            <Toaster
-              richColors
-              position="bottom-right"
-              mobileOffset={{ bottom: "calc(5rem + env(safe-area-inset-bottom))" }}
-            />
-          </TooltipProvider>
+          <TooltipProvider>{children}</TooltipProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -1,10 +1,12 @@
+import { ensureViewerPort } from "@/lib/viewer-port";
 import { procman } from "@/lib/procman";
 import { supervisor } from "@/lib/supervisor";
 import { listPaths, probePathReady } from "@/lib/mediamtx";
-import { INGEST, OUTPUT_PATH, INPUT_PATH, WEBRTC_PORT } from "@/lib/config";
+import { INGEST, OUTPUT_PATH, INPUT_PATH, VIEWER_PORT, WEBRTC_PORT } from "@/lib/config";
 import type { StatusPayload } from "@/lib/shared";
 
 export async function GET() {
+  ensureViewerPort();
   supervisor.ensureRunning();
   const [processes, paths] = await Promise.all([procman.status(), listPaths()]);
 
@@ -25,6 +27,6 @@ export async function GET() {
     paths,
     warnings: supervisor.warnings,
     abr: supervisor.abrStatus,
-    stream: { ingest: INGEST, input: INPUT_PATH, output: OUTPUT_PATH, inputReady, outputReady, webrtcPort: WEBRTC_PORT },
+    stream: { ingest: INGEST, input: INPUT_PATH, output: OUTPUT_PATH, inputReady, outputReady, webrtcPort: WEBRTC_PORT, viewerPort: VIEWER_PORT || null },
   } satisfies StatusPayload);
 }

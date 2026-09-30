@@ -27,6 +27,8 @@ OBS ──RTMP──▶ MediaMTX /assembly ──RTSP──▶ FFmpeg (AAC → O
 - **Log monitor** (`/logs`): live, filterable output from each process, with download.
 - **Settings** (`/settings`): the OBS media source URL (IP camera), the stream bitrate, and
   switching OBS's stream service to WHIP.
+- **Viewer page** (`/watch`, and the whole of port 8080): just the live video, for the audience.
+  See [Viewer port](#viewer-port).
 
 ## Requirements
 
@@ -92,6 +94,7 @@ variables:
 | `AV_OBS_BIN` | `obs` | OBS binary, for **Launch OBS** |
 | `AV_OBS_ARGS` | *(none)* | Extra OBS arguments when the panel launches it, e.g. `--minimize-to-tray` |
 | `AV_OBS_PROCESS` | *(binary name)* | Process name used to tell whether OBS is running (`pgrep -x`) |
+| `AV_VIEWER_PORT` | `8080` | Port serving only the viewer page; `0` turns it off |
 | `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` | Where the automation switches are saved (`automation.json`), and the files shared with the OBS live-bitrate script |
 
 The commands themselves are defined in `src/lib/config.ts`.
@@ -179,10 +182,35 @@ in the script's settings. Only encoders that accept a new bitrate while running 
 x264 and NVENC. With another encoder, or without the script, Automatic only recommends and a
 change needs **Apply & restart stream**. A new stream always starts at the saved bitrate.
 
+## Viewer port
+
+Viewers should not get the control panel, which has no login. The panel therefore also listens
+on a second port, `AV_VIEWER_PORT` (8080), that serves only the viewer page: `/` redirects to
+`/watch`, and only that page, its scripts and styles, a read-only "is the stream live" endpoint
+(`/api/watch`) and the playback-stats endpoint are forwarded to the panel. Everything else gets
+a 404, including every control endpoint. Share `http://<host>:8080` with viewers.
+
+Viewers on this page report playback stats like the dashboard's player, so they count towards
+[adaptive bitrate](#adaptive-bitrate); they show up as "(watch page)" in the viewer list.
+The live-feed card's link opens this page.
+
+The separate port only keeps viewers away from the controls if the firewall does too. With
+ufw, open the viewer page and WebRTC to the LAN, and the panel only to operators' devices:
+
+```bash
+sudo ufw allow from 192.168.1.0/24 to any port 8080 proto tcp   # viewer page
+sudo ufw allow from 192.168.1.0/24 to any port 8889 proto tcp   # WebRTC signalling
+sudo ufw allow from 192.168.1.0/24 to any port 8189 proto udp   # WebRTC media
+sudo ufw allow from <operator-device-ip> to any port 3000 proto tcp
+```
+
+The viewer port starts with the server, so after changing it restart the panel (in development,
+restart `pnpm dev`).
+
 ## Security
 
-The panel has **no authentication**. Anyone who can reach port 3000 can start and stop the
-stream, signal the external processes it detects, and change OBS's source URL. Only run it on a
+The panel has **no authentication**. Anyone who can reach port 3000 (not the viewer port) can
+start and stop the stream, signal the external processes it detects, and change OBS's source URL. Only run it on a
 trusted network, or restrict it with the host firewall.
 
 ## Development

@@ -44,7 +44,16 @@ async function readStats(pc: RTCPeerConnection, id: string, label: string): Prom
 }
 
 /** Minimal WHEP player for a MediaMTX WebRTC path. */
-export function VideoFeed({ path, port }: { path: string; port: number }) {
+export function VideoFeed({
+  path,
+  port,
+  source = "dashboard",
+}: {
+  path: string;
+  port: number;
+  /** Where the player runs; shown next to the device in the viewer list. */
+  source?: "dashboard" | "watch page";
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [phase, setPhase] = useState<Phase>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +70,7 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
     let grace: ReturnType<typeof setTimeout> | undefined;
     // One id per connection: its counters start from zero. (crypto.randomUUID needs HTTPS.)
     const viewerId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const label = deviceLabel(navigator.userAgent);
+    const label = `${deviceLabel(navigator.userAgent)} (${source})`;
     const statsTimer = setInterval(() => {
       if (pc.connectionState !== "connected") return;
       readStats(pc, viewerId, label)
@@ -143,7 +152,7 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
       pc.close();
       if (sessionUrl) fetch(sessionUrl, { method: "DELETE" }).catch(() => {});
     };
-  }, [path, port, attempt]);
+  }, [path, port, attempt, source]);
 
   return (
     <div className="relative overflow-hidden rounded-lg bg-black aspect-video">
@@ -155,7 +164,9 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
         </div>
       )}
       <div className="absolute left-3 top-3 flex items-center gap-2">
-        <span className="rounded bg-black/60 px-2 py-0.5 font-mono text-xs text-white">/{path}</span>
+        {source === "dashboard" && (
+          <span className="rounded bg-black/60 px-2 py-0.5 font-mono text-xs text-white">/{path}</span>
+        )}
         {phase === "playing" && (
           <span className="flex items-center gap-1 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
             <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden /> LIVE

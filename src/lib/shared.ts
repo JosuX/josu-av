@@ -179,5 +179,14 @@ export interface StatusPayload {
     inputReady: boolean | null;
     outputReady: boolean;
     webrtcPort: number;
+    /** Port of the viewer-only page, or null when it is off. */
+    viewerPort: number | null;
   };
+}
+
+/** Payload of GET /api/watch, the only status the viewer page gets. */
+export interface WatchPayload {
+  live: boolean;
+  path: string;
+  webrtcPort: number;
 }

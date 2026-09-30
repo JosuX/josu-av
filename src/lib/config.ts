@@ -125,3 +125,9 @@ export const OBS_PROCESS = process.env.AV_OBS_PROCESS ?? OBS_BIN.split("/").pop(
 /** Panel state: automation switches, and the files shared with the OBS live-bitrate script. */
 export const STATE_DIR =
   process.env.AV_STATE_DIR ?? `${process.env.XDG_STATE_HOME ?? `${process.env.HOME}/.local/state`}/av-control`;
+
+/**
+ * Port that serves only the viewer page (/watch) and what it needs, so viewers never reach the
+ * controls. "0" turns it off. The panel itself stays on PORT (3000).
+ */
+export const VIEWER_PORT = Number(process.env.AV_VIEWER_PORT ?? 8080);

@@ -50,9 +50,13 @@ export function StreamCard({ status }: { status: StatusPayload }) {
             </Badge>
           )}
           {stream.outputReady && (
-            <Button variant="ghost" size="icon-sm" asChild aria-label="Open MediaMTX player">
+            <Button variant="ghost" size="icon-sm" asChild aria-label="Open the viewer page">
               <a
-                href={`//${typeof window !== "undefined" ? location.hostname : "localhost"}:${stream.webrtcPort}/${stream.output}`}
+                href={
+                  stream.viewerPort
+                    ? `//${typeof window !== "undefined" ? location.hostname : "localhost"}:${stream.viewerPort}/watch`
+                    : `//${typeof window !== "undefined" ? location.hostname : "localhost"}:${stream.webrtcPort}/${stream.output}`
+                }
                 target="_blank"
                 rel="noreferrer"
               >
