@@ -34,6 +34,7 @@ import {
   requestBitrate,
 } from "./live-bitrate";
 import { viewerInfo, viewers } from "./viewers";
+import { attributeStalls, type IngestEvidence } from "./stalls";
 import { eventLogs } from "./eventlog";
 import { listWebRTCSessions, type WebRTCSession } from "./mediamtx";
 import { formatDuration } from "@/components/format";
@@ -43,6 +44,7 @@ import {
   type AutomationEvent,
   type AutomationPayload,
   type AutomationSettings,
+  isStruggling,
   type HealthWarning,
   type ViewerInfo,
 } from "./shared";
@@ -74,6 +76,9 @@ const CONGESTION_WARN = 0.5;
 const OBS_LAUNCH_WAIT_MS = 30_000;
 const OBS_LAUNCH_GIVE_UP = 3;
 const OBS_STABLE_MS = 60_000;
+
+/** Window for counting packets lost from OBS, matching the viewers' stats window. */
+const INGEST_WINDOW_MS = 25_000;
 
 /** Window for measuring OBS's actual output bitrate. */
 const OUTPUT_RATE_WINDOW_MS = 10_000;
@@ -187,6 +192,9 @@ class Supervisor {
   private keepLive = { failures: 0, nextAt: 0 };
   private cameras = new Map<string, { state: string; since: number; lastReload: number }>();
   private frames: FrameSample[] = [];
+  /** Evidence that the stream stalls before viewers get it (see stalls.ts). */
+  private ingestLoss: { ts: number; lost: number }[] = [];
+  private encoderLag = false;
   private lastWhipAttempt = 0;
   private obsLaunch = { attempts: 0, nextAt: 0, connectedSince: 0 };
   /** For the logs: the last stream state, viewers' health and MediaMTX sessions seen. */
@@ -288,7 +296,11 @@ class Supervisor {
 
     const out = paths?.find((p) => p.name === OUTPUT_PATH);
     const mtxReady = paths !== null;
-    if (mtxReady) this.logSessions(await listWebRTCSessions());
+    if (mtxReady) {
+      const sessions = await listWebRTCSessions();
+      this.logSessions(sessions);
+      this.recordIngestLoss(sessions);
+    } else this.ingestLoss = [];
 
     try {
       await withObs((obs) => this.checkObs(obs, add, out, mtxReady));
@@ -305,6 +317,7 @@ class Supervisor {
       this.abr.status = this.viewersWithoutObs(out, Date.now());
       if (this.settings.launchObs) await this.maybeLaunchObs(add, mtxReady, Date.now());
       this.frames = [];
+      this.encoderLag = false;
       for (const w of codecWarnings(null, out?.ready ? out.tracks : [])) add(w);
       if (this.settings.keepStreamLive)
         add({
@@ -445,9 +458,8 @@ class Supervisor {
     const canApply = !!scriptLive && isLiveCapable(encoder);
 
     const measured = viewers.metrics(now);
-    const infos = measured.map(viewerInfo);
-    this.logViewerHealth(infos);
-    if (infos.some((v) => v.health === "network" || v.health === "device")) a.lastStruggleAt = now;
+    const infos = this.judgeViewers(measured.map(viewerInfo), add);
+    if (infos.some((v) => isStruggling(v.health))) a.lastStruggleAt = now;
     const device = infos.filter((v) => v.health === "device");
     if (device.length)
       add({
@@ -504,6 +516,37 @@ class Supervisor {
     };
   }
 
+  /** Blame the source for stalls when the evidence says so, warn about it, and log verdicts. */
+  private judgeViewers(infos: ViewerInfo[], add: ((w: HealthWarning) => void) | null): ViewerInfo[] {
+    const { viewers: judged, stall } = attributeStalls(infos, this.ingestEvidence());
+    if (stall && add)
+      add({
+        id: "stream-stall",
+        level: "warning",
+        title: `The stream is stalling before it reaches viewers (${stall.count} affected)`,
+        detail:
+          `${stall.reasons.join("; ")}. ` +
+          "It isn't their devices: lower the bitrate, pick a faster encoder preset or a lower frame rate under Settings → Stream output.",
+      });
+    this.logViewerHealth(judged);
+    return judged;
+  }
+
+  private recordIngestLoss(sessions: WebRTCSession[] | null, now = Date.now()) {
+    if (!sessions) return;
+    const lost = sessions.filter((s) => s.state === "publish" && s.path === OUTPUT_PATH).reduce((n, s) => n + s.packetsLost, 0);
+    const last = this.ingestLoss.at(-1);
+    if (last && lost < last.lost) this.ingestLoss = []; // a new publisher starts from zero
+    this.ingestLoss.push({ ts: now, lost });
+    while (this.ingestLoss.length > 1 && now - this.ingestLoss[1].ts >= INGEST_WINDOW_MS) this.ingestLoss.shift();
+  }
+
+  private ingestEvidence(): IngestEvidence {
+    const first = this.ingestLoss[0];
+    const last = this.ingestLoss.at(-1);
+    return { packetsLost: first && last ? last.lost - first.lost : 0, encoderLag: this.encoderLag };
+  }
+
   private logStreamChange(stream: StreamStatus) {
     const prev = this.lastStream;
     this.lastStream = { active: stream.active, reconnecting: stream.reconnecting };
@@ -533,6 +576,10 @@ class Supervisor {
         log.info(`${v.label}: ${prev ? "playing smoothly again" : "playing smoothly"} (${picture || "picture size unknown"}, ${v.kbps} kbps)`);
       else if (v.health === "network")
         log.warn(`${v.label}: losing packets (${v.lossPct.toFixed(1)}% lost, ${v.freezeSec.toFixed(1)} s frozen, ${v.kbps} kbps)`);
+      else if (v.health === "source")
+        log.warn(
+          `${v.label}: stalling because the stream itself stalled upstream (${v.dropPct.toFixed(1)}% of frames dropped, ${v.freezeSec.toFixed(1)} s frozen)`,
+        );
       else
         log.warn(`${v.label}: device can't keep up (${v.dropPct.toFixed(1)}% of frames dropped, ${v.freezeSec.toFixed(1)} s frozen)`);
     }
@@ -560,7 +607,7 @@ class Supervisor {
   /** Viewer health while OBS is unreachable: players still report, bitrate is unknown. */
   private viewersWithoutObs(out: PathInfo | undefined, now: number): AbrStatus {
     const measured = viewers.metrics(now);
-    this.logViewerHealth(measured.map(viewerInfo));
+    const infos = this.judgeViewers(measured.map(viewerInfo), null);
     return {
       mode: this.settings.adaptiveBitrate,
       streamActive: !!out?.ready,
@@ -569,7 +616,7 @@ class Supervisor {
       min: this.settings.minBitrate,
       outputKbps: null,
       script: { state: "missing", path: SCRIPT_PATH, encoder: null, liveCapable: false },
-      viewers: measured.map(viewerInfo),
+      viewers: infos,
       unmeasured: Math.max(0, (out?.readers ?? 0) - measured.length),
       recommendation: null,
       lastChange: this.abr.lastChange,
@@ -707,7 +754,9 @@ class Supervisor {
     if (last && sample.netTotal < last.netTotal) this.frames = [];
     this.frames.push(sample);
     while (this.frames.length > 1 && now - this.frames[1].ts >= QUALITY_WINDOW_MS) this.frames.shift();
-    if (this.frames.length > 1) for (const w of frameWarnings(this.frames[0], sample)) add(w);
+    const quality = this.frames.length > 1 ? frameWarnings(this.frames[0], sample) : [];
+    for (const w of quality) add(w);
+    this.encoderLag = quality.some((w) => w.id === "quality-encoding" || w.id === "quality-rendering");
   }
 }
 

@@ -6,6 +6,7 @@ import CountUp from "./reactbits/CountUp";
 import SpotlightCard from "./reactbits/SpotlightCard";
 import { EASE } from "./motion";
 import { cn } from "@/lib/utils";
+import { isStruggling } from "@/lib/shared";
 import type { StatusPayload } from "./types";
 
 const MODE: Record<string, string> = { off: "Adaptive off", recommend: "Adaptive: recommend", auto: "Adaptive: automatic" };
@@ -19,7 +20,7 @@ export function KpiStrip({ status }: { status: StatusPayload }) {
   const viewers = abr?.viewers ?? [];
   const count = (source: string) => viewers.filter((v) => v.source === source).length;
   const total = abr ? viewers.length + abr.unmeasured : (out?.readers ?? 0);
-  const struggling = viewers.filter((v) => !v.hidden && (v.health === "network" || v.health === "device")).length;
+  const struggling = viewers.filter((v) => !v.hidden && isStruggling(v.health)).length;
   // "Measuring" only until someone has a verdict; one newcomer doesn't hide everyone else's.
   const judged = viewers.filter((v) => !v.hidden && v.health !== "unknown");
   const measuring = viewers.length > 0 && judged.length === 0;

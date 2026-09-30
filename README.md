@@ -178,10 +178,14 @@ its browser's WebRTC stats (packets lost, frames dropped, time frozen) every 5 s
 watch elsewhere, such as MediaMTX's player page, are counted but can't be measured.
 
 Over a 25 s window each viewer is **smooth**, **losing packets** (2% or more lost, or frozen
-while losing some: the network can't keep up), or **lagging** (dropping frames or freezing
-without loss: the device can't decode smoothly, or the stream stalled before reaching it).
+while losing some: the network can't keep up), **lagging** (dropping frames or freezing without
+loss: the device can't decode smoothly) or **stream stalled**: lagging, but the stream itself
+stalled before reaching them. The panel blames the source when MediaMTX lost packets coming from
+OBS in the same window, when OBS is dropping frames while encoding, or when half or more of the
+measured viewers (at least two) freeze at once; the dashboard then says so and points at Stream
+output instead of at viewers' devices.
 
-- When half or more of the measured viewers are struggling, losing packets or lagging, the
+- When half or more of the measured viewers are struggling (losing packets, lagging or stalled), the
   bitrate drops 20%, then waits 30 s before judging again. It never goes below the floor
   (default 1500 kbps). For lagging devices a lower bitrate eases decoding; if they keep lagging,
   the dashboard suggests lowering OBS's output resolution, which helps most.

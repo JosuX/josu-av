@@ -68,6 +68,8 @@ export interface WebRTCSession {
   path: string;
   remoteAddr: string;
   created: number;
+  /** RTP packets lost on the way in (for a publisher: between OBS and MediaMTX). */
+  packetsLost: number;
 }
 
 /** WebRTC sessions (players and publishers), or null when the API is unreachable. */
@@ -79,7 +81,15 @@ export async function listWebRTCSessions(): Promise<WebRTCSession[] | null> {
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {
-      items: { id: string; state: string; path: string; remoteAddr: string; created: string }[];
+      items: {
+        id: string;
+        state: string;
+        path: string;
+        remoteAddr: string;
+        created: string;
+        inboundRTPPacketsLost?: number;
+        rtpPacketsLost?: number;
+      }[];
     };
     return data.items.map((s) => ({
       id: s.id,
@@ -87,6 +97,7 @@ export async function listWebRTCSessions(): Promise<WebRTCSession[] | null> {
       path: s.path,
       remoteAddr: s.remoteAddr,
       created: Date.parse(s.created) || Date.now(),
+      packetsLost: s.inboundRTPPacketsLost ?? s.rtpPacketsLost ?? 0,
     }));
   } catch {
     return null;

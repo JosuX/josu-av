@@ -17,6 +17,7 @@ const HEALTH: Record<ViewerInfo["health"], { label: string; className: string }>
   good: { label: "Smooth", className: "bg-success/15 text-success" },
   network: { label: "Losing packets", className: "bg-destructive/15 text-destructive" },
   device: { label: "Lagging", className: "bg-warning/15 text-warning" },
+  source: { label: "Stream stalled", className: "bg-warning/15 text-warning" },
   unknown: { label: "Measuring…", className: "bg-muted text-muted-foreground" },
 };
 

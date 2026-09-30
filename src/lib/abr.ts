@@ -35,13 +35,19 @@ const round100 = (n: number) => Math.round(n / 100) * 100;
 export function decide(i: AbrInput): AbrDecision {
   const measured = i.health.filter((h) => h !== "unknown");
   if (!measured.length) return { action: "hold", reason: "No measured viewers" };
-  // Both kinds of trouble call for less data: a network that can't carry it, or a device that
-  // can't decode it smoothly (a lower bitrate eases decoding, if less than a lower resolution).
+  // Every kind of trouble calls for less data: a network that can't carry it, a device that
+  // can't decode it smoothly, or a source that stalls (lossy ingest or an overloaded encoder).
   const net = measured.filter((h) => h === "network").length;
   const dev = measured.filter((h) => h === "device").length;
-  const struggling = net + dev;
+  const src = measured.filter((h) => h === "source").length;
+  const struggling = net + dev + src;
+  const kinds = [
+    net && [net, "losing packets"],
+    dev && [dev, "lagging"],
+    src && [src, "stalled upstream"],
+  ].filter(Boolean) as [number, string][];
   const who = `${struggling} of ${measured.length} ${measured.length === 1 ? "viewer is" : "viewers are"} ${
-    dev === 0 ? "losing packets" : net === 0 ? "lagging" : `struggling (${net} losing packets, ${dev} lagging)`
+    kinds.length === 1 ? kinds[0][1] : `struggling (${kinds.map(([n, k]) => `${n} ${k}`).join(", ")})`
   }`;
 
   if (struggling / measured.length >= DOWN_SHARE) {

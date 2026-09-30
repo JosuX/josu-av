@@ -69,6 +69,17 @@ describe("decide", () => {
     });
   });
 
+  it("counts a stream stalled upstream as struggling", () => {
+    expect(decide({ ...base, health: ["source", "source", "good"] })).toMatchObject({
+      action: "down",
+      reason: "2 of 3 viewers are stalled upstream",
+    });
+    expect(decide({ ...base, health: ["network", "source", "device", "good"] })).toMatchObject({
+      action: "down",
+      reason: "3 of 4 viewers are struggling (1 losing packets, 1 lagging, 1 stalled upstream)",
+    });
+  });
+
   it("counts packet loss and lag together", () => {
     expect(decide({ ...base, health: ["network", "device", "good", "good"] })).toMatchObject({
       action: "down",

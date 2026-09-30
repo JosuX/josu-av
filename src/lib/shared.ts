@@ -91,8 +91,17 @@ export function parseAutomationPatch(body: unknown): { patch: Partial<Automation
   return { patch };
 }
 
-/** How a viewer's playback is going. "device": dropping frames without losing packets. */
-export type ViewerHealth = "good" | "network" | "device" | "unknown";
+/**
+ * How a viewer's playback is going. "network": losing packets. "device": dropping frames or
+ * freezing without loss. "source": the same, but the stream itself stalled before reaching the
+ * viewer (see stalls.ts).
+ */
+export type ViewerHealth = "good" | "network" | "device" | "source" | "unknown";
+
+/** Health values that mean playback is suffering. */
+export function isStruggling(h: ViewerHealth) {
+  return h === "network" || h === "device" || h === "source";
+}
 
 /** Where a player runs. */
 export type ViewerSource = "dashboard" | "watch page";
