@@ -2,59 +2,76 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Columns2, Square } from "lucide-react";
+import { Bot, Cog, LayoutGrid, Server, Users, Video, type LucideIcon } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { LogConsole } from "./LogConsole";
-import type { ProcName } from "./types";
+import { cn } from "@/lib/utils";
+import { LogConsole, type LogSource } from "./LogConsole";
 
-export type LogView = "split" | ProcName;
+export type LogView = "all" | string;
 
-export function LogMonitor({
-  procs,
-  initialView,
-}: {
-  procs: { name: ProcName; label: string }[];
-  initialView: LogView;
-}) {
+const ICONS: Record<string, LucideIcon> = {
+  mediamtx: Server,
+  ffmpeg: Cog,
+  clients: Users,
+  obs: Video,
+  automation: Bot,
+};
+
+/** Grid for "All" on wide screens: every log visible at once. */
+function gridClass(n: number) {
+  if (n <= 1) return "flex";
+  if (n === 2) return "grid lg:grid-cols-2";
+  if (n <= 4) return "grid lg:grid-cols-2 lg:grid-rows-2";
+  return "grid lg:grid-cols-3 lg:grid-rows-2";
+}
+
+export function LogMonitor({ logs, initialView }: { logs: LogSource[]; initialView: LogView }) {
   const router = useRouter();
   const [view, setView] = useState<LogView>(initialView);
 
   const change = (v: string) => {
     if (!v) return;
-    setView(v as LogView);
-    router.replace(v === "split" ? "/logs" : `/logs?view=${v}`, { scroll: false });
+    setView(v);
+    router.replace(v === "all" ? "/logs" : `/logs?view=${v}`, { scroll: false });
   };
 
-  const shown = view === "split" ? procs : procs.filter((p) => p.name === view);
+  const shown = view === "all" ? logs : logs.filter((l) => l.name === view);
 
   return (
     <div className="flex flex-col gap-4 lg:h-[calc(100dvh-3.5rem-3rem)] lg:min-h-[480px]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Log monitor</h1>
-          <p className="hidden text-sm text-muted-foreground sm:block">Live output from processes started by this panel.</p>
+          <p className="hidden text-sm text-muted-foreground sm:block">
+            Process output, viewers, OBS and automation, live.
+          </p>
         </div>
-        {procs.length > 1 && (
-          <ToggleGroup type="single" variant="outline" size="sm" value={view} onValueChange={change} className="w-full sm:w-auto [&>*]:flex-1">
-            <ToggleGroupItem value="split" aria-label="Split view">
-              <Columns2 /> {procs.length === 2 ? "Both" : "All"}
+        <div className="-mx-3 overflow-x-auto px-3 sm:mx-0 sm:px-0">
+          <ToggleGroup type="single" variant="outline" size="sm" value={view} onValueChange={change} className="w-max">
+            <ToggleGroupItem value="all" aria-label="All logs">
+              <LayoutGrid /> All
             </ToggleGroupItem>
-            {procs.map((p) => (
-              <ToggleGroupItem key={p.name} value={p.name}>
-                <Square /> {p.label}
-              </ToggleGroupItem>
-            ))}
+            {logs.map((l) => {
+              const Icon = ICONS[l.name] ?? Server;
+              return (
+                <ToggleGroupItem key={l.name} value={l.name}>
+                  <Icon /> {l.label}
+                </ToggleGroupItem>
+              );
+            })}
           </ToggleGroup>
-        )}
+        </div>
       </div>
 
-      <div className={view === "split" && procs.length > 1 ? "grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-2" : "flex lg:min-h-0 lg:flex-1"}>
-        {shown.map((p) => (
+      <div className={cn("gap-4 lg:min-h-0 lg:flex-1", view === "all" ? gridClass(logs.length) : "flex", "flex-col lg:flex-row")}>
+        {shown.map((l) => (
           <LogConsole
-            key={p.name}
-            name={p.name}
-            label={p.label}
-            className="h-[calc(100dvh-13rem)] min-h-[320px] flex-1 lg:h-auto"
+            key={l.name}
+            source={l}
+            className={cn(
+              "min-h-[320px] flex-1 lg:h-auto lg:min-h-0",
+              shown.length > 1 ? "h-[60dvh]" : "h-[calc(100dvh-13rem)]",
+            )}
           />
         ))}
       </div>

@@ -1,5 +1,7 @@
 import "server-only";
-import type { ViewerHealth, ViewerInfo, ViewerReport } from "./shared";
+import { eventLogs } from "./eventlog";
+import type { ViewerHealth, ViewerInfo, ViewerReport, ViewerSource } from "./shared";
+import { formatDuration } from "@/components/format";
 
 // Playback stats reported by the panel's players (VideoFeed), one entry per WebRTC connection.
 
@@ -24,6 +26,7 @@ interface Sample extends ViewerReport {
 export interface ViewerMetrics {
   id: string;
   label: string;
+  source: ViewerSource;
   hidden: boolean;
   windowMs: number;
   lossRatio: number;
@@ -48,6 +51,7 @@ export function viewerMetrics(samples: Sample[]): ViewerMetrics {
   return {
     id: to.id,
     label: to.label,
+    source: to.source,
     hidden: samples.some((s) => s.hidden),
     windowMs,
     lossRatio: lost + received ? lost / (lost + received) : 0,
@@ -70,6 +74,7 @@ export function viewerInfo(m: ViewerMetrics): ViewerInfo {
   return {
     id: m.id,
     label: m.label,
+    source: m.source,
     health: classifyViewer(m),
     lossPct: m.lossRatio * 100,
     dropPct: m.dropRatio * 100,
@@ -82,21 +87,30 @@ export function viewerInfo(m: ViewerMetrics): ViewerInfo {
 }
 
 class ViewerRegistry {
-  private samples = new Map<string, Sample[]>();
+  private viewers = new Map<string, { samples: Sample[]; since: number }>();
 
-  report(r: ViewerReport, now = Date.now()) {
-    const list = this.samples.get(r.id) ?? [];
+  /** Add a report; `from` is the player's address, for the clients log. */
+  report(r: ViewerReport, now = Date.now(), from: string | null = null) {
+    let v = this.viewers.get(r.id);
+    if (!v) {
+      v = { samples: [], since: now };
+      this.viewers.set(r.id, v);
+      eventLogs.clients.info(`Viewer joined: ${r.label}${from ? ` from ${from}` : ""}`);
+    }
+    const list = v.samples;
     list.push({ ...r, ts: now });
     while (list.length > 1 && now - list[1].ts >= WINDOW_MS) list.shift();
-    this.samples.set(r.id, list);
   }
 
   /** Current viewers' metrics, dropping those that stopped reporting. */
   metrics(now = Date.now()): ViewerMetrics[] {
     const out: ViewerMetrics[] = [];
-    for (const [id, list] of this.samples) {
-      if (now - list.at(-1)!.ts > STALE_MS) this.samples.delete(id);
-      else out.push(viewerMetrics(list));
+    for (const [id, v] of this.viewers) {
+      const last = v.samples.at(-1)!;
+      if (now - last.ts > STALE_MS) {
+        this.viewers.delete(id);
+        eventLogs.clients.info(`Viewer left: ${last.label} after ${formatDuration(last.ts - v.since)}`);
+      } else out.push(viewerMetrics(v.samples));
     }
     return out;
   }

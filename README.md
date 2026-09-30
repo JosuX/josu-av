@@ -24,7 +24,16 @@ OBS ──RTMP──▶ MediaMTX /assembly ──RTSP──▶ FFmpeg (AAC → O
 ## Pages
 
 - **Dashboard** (`/`): live feed, start/stop/restart for each process, network and memory charts.
-- **Log monitor** (`/logs`): live, filterable output from each process, with download.
+  The live feed has two tabs: `/assembly` plays the path straight from MediaMTX, `/watch` embeds
+  the viewer page as viewers see it; the open-in-new-tab link follows the tab. Below it: how long
+  the stream has been live, the picture size, the bitrate MediaMTX receives (and OBS's target),
+  the codecs, and viewers split into dashboard, watch page, other players and struggling. The
+  share button shows the viewer page's LAN link with a QR code for phones.
+- **Log monitor** (`/logs`): live, filterable logs with download: each process's output, plus
+  **Clients** (viewers joining and leaving with their address and page, each viewer's playback
+  verdicts with the numbers behind them, and every WebRTC player or publisher MediaMTX sees),
+  **OBS** (connection, stream starts/stops/reconnects, frame-drop warnings, and every change the
+  panel or automation made, with camera passwords masked) and **Automation**.
 - **Settings** (`/settings`): the OBS media source URL (IP camera), the stream bitrate, and
   switching OBS's stream service to WHIP.
 - **Viewer page** (`/watch`, and the whole of port 8080): just the live video, for the audience.

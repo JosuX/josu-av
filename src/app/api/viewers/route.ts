@@ -15,11 +15,14 @@ export async function POST(req: Request) {
     b.id.length > 64 ||
     typeof b.label !== "string" ||
     typeof b.hidden !== "boolean" ||
+    (b.source !== "dashboard" && b.source !== "watch page") ||
     !COUNTERS.every((k) => isCount(b[k])) ||
     !OPTIONAL.every((k) => b[k] === null || isCount(b[k]))
   ) {
     return Response.json({ error: "invalid report" }, { status: 400 });
   }
-  viewers.report({ ...(b as unknown as ViewerReport), label: b.label.slice(0, 80) });
+  // The viewer port adds X-Forwarded-For; Next sets it for direct requests too.
+  const from = req.headers.get("x-forwarded-for")?.split(",")[0].trim().replace(/^::ffff:/, "") || null;
+  viewers.report({ ...(b as unknown as ViewerReport), label: b.label.slice(0, 80) }, Date.now(), from);
   return new Response(null, { status: 204 });
 }

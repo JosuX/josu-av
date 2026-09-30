@@ -60,6 +60,7 @@ describe("decide", () => {
 const report = {
   id: "v1",
   label: "iPad · Safari",
+  source: "watch page" as const,
   hidden: false,
   packetsLost: 0,
   packetsReceived: 0,
@@ -94,6 +95,7 @@ describe("classifyViewer", () => {
   const m: ViewerMetrics = {
     id: "v",
     label: "",
+    source: "dashboard",
     hidden: false,
     windowMs: 20_000,
     lossRatio: 0,

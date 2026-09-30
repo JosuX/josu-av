@@ -11,6 +11,8 @@ export interface LogLine {
   ts: number;
   stream: LogStream;
   text: string;
+  /** Set on event-log lines (clients, automation, OBS); process output is classified by text. */
+  level?: "info" | "warning" | "error";
 }
 
 export type ProcState = "stopped" | "starting" | "running" | "stopping" | "restarting" | "crashed";

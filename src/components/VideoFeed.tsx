@@ -19,7 +19,12 @@ const RETRY_MAX_MS = 5000;
 const STATS_EVERY_MS = 5000;
 
 /** The inbound video stats of a connection, in the shape the server expects. */
-async function readStats(pc: RTCPeerConnection, id: string, label: string): Promise<ViewerReport | null> {
+async function readStats(
+  pc: RTCPeerConnection,
+  id: string,
+  label: string,
+  source: ViewerReport["source"],
+): Promise<ViewerReport | null> {
   let v: Record<string, number | string | undefined> | undefined;
   (await pc.getStats()).forEach((s) => {
     if (s.type === "inbound-rtp" && s.kind === "video") v = s;
@@ -30,6 +35,7 @@ async function readStats(pc: RTCPeerConnection, id: string, label: string): Prom
   return {
     id,
     label,
+    source,
     hidden: document.visibilityState === "hidden",
     packetsLost: n("packetsLost"),
     packetsReceived: n("packetsReceived"),
@@ -73,7 +79,7 @@ export function VideoFeed({
     const label = `${deviceLabel(navigator.userAgent)} (${source})`;
     const statsTimer = setInterval(() => {
       if (pc.connectionState !== "connected") return;
-      readStats(pc, viewerId, label)
+      readStats(pc, viewerId, label, source)
         .then((r) =>
           r
             ? fetch("/api/viewers", {

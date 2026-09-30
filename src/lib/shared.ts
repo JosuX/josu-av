@@ -11,6 +11,18 @@ export function isProcAction(s: unknown): s is ProcAction {
   return PROC_ACTIONS.includes(s as ProcAction);
 }
 
+/** Logs written by the panel itself, next to the processes' own output in the Log Monitor. */
+export const EVENT_LOGS = [
+  { name: "clients", label: "Clients", empty: "No viewers yet: players joining, leaving and their playback show up here" },
+  { name: "obs", label: "OBS", empty: "Nothing from OBS yet: stream starts and stops, drops and changed settings show up here" },
+  { name: "automation", label: "Automation", empty: "No automation activity yet" },
+] as const;
+export type EventLogName = (typeof EVENT_LOGS)[number]["name"];
+
+export function isEventLogName(s: string): s is EventLogName {
+  return EVENT_LOGS.some((l) => l.name === s);
+}
+
 /** Log lines kept per process, on the server and in each open console. */
 export const LOG_MAX_LINES = 3000;
 
@@ -82,9 +94,13 @@ export function parseAutomationPatch(body: unknown): { patch: Partial<Automation
 /** How a viewer's playback is going. "device": dropping frames without losing packets. */
 export type ViewerHealth = "good" | "network" | "device" | "unknown";
 
+/** Where a player runs. */
+export type ViewerSource = "dashboard" | "watch page";
+
 export interface ViewerInfo {
   id: string;
   label: string;
+  source: ViewerSource;
   health: ViewerHealth;
   lossPct: number;
   dropPct: number;
@@ -126,6 +142,7 @@ export interface AbrStatus {
 export interface ViewerReport {
   id: string;
   label: string;
+  source: ViewerSource;
   hidden: boolean;
   packetsLost: number;
   packetsReceived: number;
@@ -243,6 +260,12 @@ export interface StatusPayload {
     webrtcPort: number;
     /** Port of the viewer-only page, or null when it is off. */
     viewerPort: number | null;
+    /** When the output path went live (ms since epoch). */
+    liveSince: number | null;
+    /** Bitrate MediaMTX is receiving on the output path, measured over ~10 s. */
+    inKbps: number | null;
+    /** This machine's LAN address, for links other devices can open. */
+    lanHost: string | null;
   };
 }
 

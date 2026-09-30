@@ -15,9 +15,11 @@ import { StateBadge } from "./StateBadge";
 import { procAction } from "./hooks";
 import type { LogLine, ProcName, ProcState } from "./types";
 
-type Level = "error" | "warn" | "info" | "progress" | "system";
+type Tone = "error" | "warn" | "info" | "progress" | "system";
 
-function levelOf(l: LogLine): Level {
+function toneOf(l: LogLine): Tone {
+  // Event-log lines carry their level; process output is classified by its text.
+  if (l.level) return l.level === "warning" ? "warn" : l.level;
   if (l.stream === "system") return "system";
   const t = l.text;
   if (/(^| )(ERR|FTL)( |$)|\b(error|failed|fatal|invalid|refused|not found)\b/i.test(t)) return "error";
@@ -26,7 +28,7 @@ function levelOf(l: LogLine): Level {
   return "info";
 }
 
-const LEVEL_CLASS: Record<Level, string> = {
+const TONE_CLASS: Record<Tone, string> = {
   error: "text-log-error",
   warn: "text-log-warn",
   info: "text-log-stderr",
@@ -34,14 +36,24 @@ const LEVEL_CLASS: Record<Level, string> = {
   system: "text-log-system font-medium",
 };
 
-type Line = LogLine & { level: Level };
+type Line = LogLine & { tone: Tone };
 
-const withLevel = (l: LogLine): Line => ({ ...l, level: levelOf(l) });
-const isIssue = (l: Line) => l.level === "error" || l.level === "warn";
+const withTone = (l: LogLine): Line => ({ ...l, tone: toneOf(l) });
+const isIssue = (l: Line) => l.tone === "error" || l.tone === "warn";
 
 type Filter = "all" | "issues";
 
-export function LogConsole({ name, label, className }: { name: ProcName; label: string; className?: string }) {
+/** One log: a process's output ("process") or one the panel writes itself ("events"). */
+export interface LogSource {
+  name: string;
+  label: string;
+  kind: "process" | "events";
+  /** Shown while the log is empty. */
+  empty?: string;
+}
+
+export function LogConsole({ source, className }: { source: LogSource; className?: string }) {
+  const { name, label, kind } = source;
   // Levels are classified once per line on arrival, not on every render.
   const [lines, setLines] = useState<Line[]>([]);
   const [state, setState] = useState<ProcState>("stopped");
@@ -56,9 +68,9 @@ export function LogConsole({ name, label, className }: { name: ProcName; label: 
     const es = new EventSource(`/api/logs/${name}`);
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
-    es.addEventListener("backlog", (e) => setLines((JSON.parse((e as MessageEvent).data) as LogLine[]).map(withLevel)));
+    es.addEventListener("backlog", (e) => setLines((JSON.parse((e as MessageEvent).data) as LogLine[]).map(withTone)));
     es.addEventListener("line", (e) => {
-      const l = withLevel(JSON.parse((e as MessageEvent).data) as LogLine);
+      const l = withTone(JSON.parse((e as MessageEvent).data) as LogLine);
       setLines((prev) => (prev.length >= LOG_MAX_LINES ? [...prev.slice(-(LOG_MAX_LINES - 1)), l] : [...prev, l]));
     });
     es.addEventListener("state", (e) => setState(JSON.parse((e as MessageEvent).data)));
@@ -69,7 +81,7 @@ export function LogConsole({ name, label, className }: { name: ProcName; label: 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return lines
-      .filter((l) => (filter === "issues" ? isIssue(l) || l.level === "system" : true))
+      .filter((l) => (filter === "issues" ? isIssue(l) || l.tone === "system" : true))
       .filter((l) => (q ? l.text.toLowerCase().includes(q) : true));
   }, [lines, query, filter]);
 
@@ -87,9 +99,19 @@ export function LogConsole({ name, label, className }: { name: ProcName; label: 
     if (atBottom !== follow) setFollow(atBottom);
   };
 
+  const clear = () => {
+    if (kind === "process") void procAction(name as ProcName, "clear-logs");
+    else
+      void fetch(`/api/logs/${name}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear" }),
+      });
+  };
+
   const download = () => {
     const text = lines
-      .map((l) => `${new Date(l.ts).toISOString()} [${l.stream}] ${l.text}`)
+      .map((l) => `${new Date(l.ts).toISOString()} [${l.level ?? l.stream}] ${l.text}`)
       .join("\n");
     const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: `${name}-${Date.now()}.log` });
@@ -102,7 +124,7 @@ export function LogConsole({ name, label, className }: { name: ProcName; label: 
       <CardHeader className="border-b py-3!">
         <CardTitle className="flex items-center gap-2">
           {label}
-          <StateBadge state={state} />
+          {kind === "process" && <StateBadge state={state} />}
           {!connected && <span className="text-xs font-normal text-muted-foreground">reconnecting…</span>}
         </CardTitle>
         <CardAction className="flex items-center gap-1">
@@ -116,7 +138,7 @@ export function LogConsole({ name, label, className }: { name: ProcName; label: 
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" onClick={() => procAction(name, "clear-logs")} aria-label="Clear log" disabled={!lines.length}>
+              <Button variant="ghost" size="icon-sm" onClick={clear} aria-label="Clear log" disabled={!lines.length}>
                 <Eraser />
               </Button>
             </TooltipTrigger>
@@ -163,11 +185,13 @@ export function LogConsole({ name, label, className }: { name: ProcName; label: 
         >
           {visible.length === 0 ? (
             <div className="grid h-full place-items-center text-muted-foreground">
-              {lines.length ? "No lines match the filter" : "No output yet — start the process to see its log"}
+              {lines.length
+                ? "No lines match the filter"
+                : (source.empty ?? "No output yet — start the process to see its log")}
             </div>
           ) : (
             visible.map((l) => (
-              <div key={l.id} className={cn("flex gap-3 whitespace-pre-wrap break-all", LEVEL_CLASS[l.level])}>
+              <div key={l.id} className={cn("flex gap-3 whitespace-pre-wrap break-all", TONE_CLASS[l.tone])}>
                 {timestamps && (
                   <span className="hidden shrink-0 text-muted-foreground/70 tabular-nums select-none sm:inline">
                     {new Date(l.ts).toLocaleTimeString([], { hour12: false })}

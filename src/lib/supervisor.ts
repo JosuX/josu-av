@@ -14,6 +14,7 @@ import {
   isRestarting,
   isSourceActive,
   isWhipService,
+  stoppedByPanel,
   listNetworkSources,
   reloadMediaSource,
   switchToWhip,
@@ -33,6 +34,9 @@ import {
   requestBitrate,
 } from "./live-bitrate";
 import { viewerInfo, viewers } from "./viewers";
+import { eventLogs } from "./eventlog";
+import { listWebRTCSessions, type WebRTCSession } from "./mediamtx";
+import { formatDuration } from "@/components/format";
 import {
   isValidBitrate,
   type AbrStatus,
@@ -40,6 +44,7 @@ import {
   type AutomationPayload,
   type AutomationSettings,
   type HealthWarning,
+  type ViewerInfo,
 } from "./shared";
 
 // Background checks that keep the feed up and flag problems, whether or not a browser has the
@@ -184,6 +189,10 @@ class Supervisor {
   private frames: FrameSample[] = [];
   private lastWhipAttempt = 0;
   private obsLaunch = { attempts: 0, nextAt: 0, connectedSince: 0 };
+  /** For the logs: the last stream state, viewers' health and MediaMTX sessions seen. */
+  private lastStream: { active: boolean; reconnecting: boolean } | null = null;
+  private viewerHealth = new Map<string, ViewerInfo["health"]>();
+  private sessions: Map<string, WebRTCSession> | null = null;
   private abr = {
     lastChangeAt: 0,
     lastStruggleAt: 0,
@@ -237,9 +246,12 @@ class Supervisor {
     void this.tick();
   }
 
-  private event(level: AutomationEvent["level"], text: string) {
+  /** Record an automation event; `obs` also puts it in the OBS log. */
+  private event(level: AutomationEvent["level"], text: string, { obs = false } = {}) {
     this.events.push({ id: ++this.seq, ts: Date.now(), level, text });
     if (this.events.length > EVENTS_MAX) this.events.shift();
+    eventLogs.automation.log(level, text);
+    if (obs) eventLogs.obs.log(level, text);
     const log = level === "error" ? console.error : level === "warning" ? console.warn : console.log;
     log(`[automation] ${text}`);
   }
@@ -250,9 +262,12 @@ class Supervisor {
     try {
       const next = new Map<string, HealthWarning>();
       await this.check(next);
-      // Record each warning once, when it appears.
+      // Record each warning once when it appears, and note when it clears.
       for (const w of next.values())
-        if (!this.warningsById.has(w.id)) this.event(w.level, `${w.title}${w.detail ? ` — ${w.detail}` : ""}`);
+        if (!this.warningsById.has(w.id))
+          this.event(w.level, `${w.title}${w.detail ? ` — ${w.detail}` : ""}`, { obs: isObsWarning(w.id) });
+      for (const w of this.warningsById.values())
+        if (!next.has(w.id)) this.event("info", `Resolved: ${w.title}`, { obs: isObsWarning(w.id) });
       this.warningsById = next;
     } catch (e) {
       console.error("[automation] check failed", e);
@@ -273,16 +288,19 @@ class Supervisor {
 
     const out = paths?.find((p) => p.name === OUTPUT_PATH);
     const mtxReady = paths !== null;
+    if (mtxReady) this.logSessions(await listWebRTCSessions());
 
     try {
       await withObs((obs) => this.checkObs(obs, add, out, mtxReady));
+      if (!this.obsConnected) eventLogs.obs.info("Connected to OBS");
       this.obsConnected = true;
       const l = this.obsLaunch;
       l.connectedSince ||= Date.now();
       if (Date.now() - l.connectedSince >= OBS_STABLE_MS) l.attempts = 0;
     } catch (e) {
-      if (this.obsConnected) this.event("warning", `Lost contact with OBS: ${(e as Error).message}`);
+      if (this.obsConnected) this.event("warning", `Lost contact with OBS: ${(e as Error).message}`, { obs: true });
       this.obsConnected = false;
+      this.lastStream = null;
       this.obsLaunch.connectedSince = 0;
       this.abr.status = this.viewersWithoutObs(out, Date.now());
       if (this.settings.launchObs) await this.maybeLaunchObs(add, mtxReady, Date.now());
@@ -350,6 +368,7 @@ class Supervisor {
   ) {
     let stream = await getStreamStatus(obs);
     const now = Date.now();
+    this.logStreamChange(stream);
 
     // Codec: what OBS is set to encode, and what MediaMTX actually receives.
     for (const w of codecWarnings(await getEncoderId(obs), out?.ready ? out.tracks : [])) add(w);
@@ -427,6 +446,7 @@ class Supervisor {
 
     const measured = viewers.metrics(now);
     const infos = measured.map(viewerInfo);
+    this.logViewerHealth(infos);
     if (infos.some((v) => v.health === "network")) a.lastStruggleAt = now;
     const device = infos.filter((v) => v.health === "device");
     if (device.length)
@@ -481,9 +501,63 @@ class Supervisor {
     };
   }
 
+  private logStreamChange(stream: StreamStatus) {
+    const prev = this.lastStream;
+    this.lastStream = { active: stream.active, reconnecting: stream.reconnecting };
+    const log = eventLogs.obs;
+    if (!prev) {
+      log.info(stream.active ? `Stream is live (for ${formatDuration(stream.durationMs)})` : "Stream is off");
+      return;
+    }
+    if (stream.active && !prev.active) log.info("Stream started");
+    if (!stream.active && prev.active)
+      log.warn(`Stream stopped${stoppedByPanel(stream) ? ` and could not be restarted: ${stoppedByPanel(stream)}` : ""}`);
+    if (stream.reconnecting && !prev.reconnecting) log.warn("OBS lost its connection to the media server and is reconnecting");
+    if (!stream.reconnecting && prev.reconnecting && stream.active) log.info("OBS reconnected");
+  }
+
+  /** Log each viewer's first verdict and every change after it. */
+  private logViewerHealth(infos: ViewerInfo[]) {
+    const seen = new Set<string>();
+    for (const v of infos) {
+      seen.add(v.id);
+      const prev = this.viewerHealth.get(v.id);
+      if (v.health === "unknown" || v.health === prev) continue;
+      this.viewerHealth.set(v.id, v.health);
+      const picture = [v.resolution, v.fps != null ? `${Math.round(v.fps)} fps` : null].filter(Boolean).join(" @ ");
+      const log = eventLogs.clients;
+      if (v.health === "good")
+        log.info(`${v.label}: ${prev ? "playing smoothly again" : "playing smoothly"} (${picture || "picture size unknown"}, ${v.kbps} kbps)`);
+      else if (v.health === "network")
+        log.warn(`${v.label}: losing packets (${v.lossPct.toFixed(1)}% lost, ${v.freezeSec.toFixed(1)} s frozen, ${v.kbps} kbps)`);
+      else
+        log.warn(`${v.label}: device can't keep up (${v.dropPct.toFixed(1)}% of frames dropped, ${v.freezeSec.toFixed(1)} s frozen)`);
+    }
+    for (const id of this.viewerHealth.keys()) if (!seen.has(id)) this.viewerHealth.delete(id);
+  }
+
+  /** Log WebRTC players and publishers as MediaMTX sees them, including ones outside the panel. */
+  private logSessions(list: WebRTCSession[] | null) {
+    if (!list) return;
+    const now = new Map(list.map((s) => [s.id, s]));
+    const first = this.sessions === null;
+    const describe = (s: WebRTCSession) =>
+      s.state === "publish" ? `Publisher ${s.remoteAddr} (WHIP → /${s.path})` : `Player ${s.remoteAddr} (WebRTC, /${s.path})`;
+    for (const s of list) {
+      if (this.sessions?.has(s.id) || !s.state) continue;
+      eventLogs.clients.info(`${describe(s)} ${first ? "is connected" : "connected"} [MediaMTX session ${s.id.slice(0, 8)}]`);
+    }
+    for (const [id, s] of this.sessions ?? []) {
+      if (now.has(id) || !s.state) continue;
+      eventLogs.clients.info(`${describe(s)} disconnected after ${formatDuration(Date.now() - s.created)}`);
+    }
+    this.sessions = now;
+  }
+
   /** Viewer health while OBS is unreachable: players still report, bitrate is unknown. */
   private viewersWithoutObs(out: PathInfo | undefined, now: number): AbrStatus {
     const measured = viewers.metrics(now);
+    this.logViewerHealth(measured.map(viewerInfo));
     return {
       mode: this.settings.adaptiveBitrate,
       streamActive: !!out?.ready,
@@ -506,7 +580,11 @@ class Supervisor {
     a.lastChange = { ts: a.lastChangeAt, from, to, reason, auto };
     // Keep the recommendation from reappearing before the next check.
     if (a.status) a.status = { ...a.status, current: to, recommendation: null, lastChange: a.lastChange };
-    this.event("info", `${auto ? "Automatically " : ""}${to < from ? "lowered" : "raised"} the bitrate ${from} → ${to} kbps: ${reason}`);
+    this.event(
+      "info",
+      `${auto ? "Automatically " : ""}${to < from ? "lowered" : "raised"} the bitrate ${from} → ${to} kbps: ${reason}`,
+      { obs: true },
+    );
   }
 
   /** Apply a bitrate now through the OBS script, without restarting the stream. */
@@ -546,9 +624,9 @@ class Supervisor {
         cam.since = now;
         try {
           await reloadMediaSource(obs, src.name);
-          this.event("info", `Reloaded camera "${src.name}" (it was ${state})`);
+          this.event("info", `Reloaded camera "${src.name}" (it was ${state})`, { obs: true });
         } catch (e) {
-          this.event("error", `Could not reload camera "${src.name}": ${(e as Error).message}`);
+          this.event("error", `Could not reload camera "${src.name}": ${(e as Error).message}`, { obs: true });
         }
       }
     }
@@ -628,6 +706,11 @@ class Supervisor {
     while (this.frames.length > 1 && now - this.frames[1].ts >= QUALITY_WINDOW_MS) this.frames.shift();
     if (this.frames.length > 1) for (const w of frameWarnings(this.frames[0], sample)) add(w);
   }
+}
+
+/** Warnings about OBS's output that also belong in the OBS log. */
+function isObsWarning(id: string) {
+  return id.startsWith("quality-") || id === "codec" || id === "whip-service" || id.startsWith("obs-");
 }
 
 const LABELS: Record<keyof AutomationSettings, string> = {

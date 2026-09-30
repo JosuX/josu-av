@@ -1,4 +1,5 @@
 import "server-only";
+import { networkInterfaces } from "node:os";
 import { INGEST, INPUT_PATH, OUTPUT_PATH, VIEWER_PORT, WEBRTC_PORT, WHIP_URL } from "./config";
 import { listPaths, probePathReady } from "./mediamtx";
 import {
@@ -16,6 +17,35 @@ import type { StatusPayload, WatchPayload } from "./shared";
 
 // What the API routes return, shared with the live push (live.ts) so both send the same thing.
 
+/** Virtual interfaces (containers, VPNs) whose addresses other LAN devices can't reach. */
+const VIRTUAL_IFACE = /^(lo|docker|br-|veth|virbr|vmnet|tailscale|tun|tap|wg|wt|zt)/;
+
+/** The first IPv4 address on a physical interface, e.g. 192.168.1.25. */
+export function lanHost(): string | null {
+  for (const [name, addrs] of Object.entries(networkInterfaces())) {
+    if (VIRTUAL_IFACE.test(name)) continue;
+    const a = addrs?.find((x) => x.family === "IPv4" && !x.internal);
+    if (a) return a.address;
+  }
+  return null;
+}
+
+const RATE_WINDOW_MS = 10_000;
+let received: { ts: number; bytes: number }[] = [];
+
+/** kbps received on the output path over the last ~10 s, from MediaMTX's byte counter. */
+function receiveRate(bytes: number | undefined, now = Date.now()): number | null {
+  if (bytes === undefined) {
+    received = [];
+    return null;
+  }
+  if (received.length && bytes < received.at(-1)!.bytes) received = []; // path restarted
+  received.push({ ts: now, bytes });
+  while (received.length > 2 && now - received[1].ts >= RATE_WINDOW_MS) received.shift();
+  const [first, last] = [received[0], received.at(-1)!];
+  return last.ts - first.ts >= 1000 ? Math.round(((last.bytes - first.bytes) * 8) / (last.ts - first.ts)) : null;
+}
+
 export async function getStatus(): Promise<StatusPayload> {
   const [processes, paths] = await Promise.all([procman.status(), listPaths()]);
 
@@ -31,6 +61,7 @@ export async function getStatus(): Promise<StatusPayload> {
     inputReady = null;
   }
 
+  const out = paths?.find((p) => p.name === OUTPUT_PATH && p.ready);
   return {
     processes,
     paths,
@@ -44,6 +75,9 @@ export async function getStatus(): Promise<StatusPayload> {
       outputReady,
       webrtcPort: WEBRTC_PORT,
       viewerPort: VIEWER_PORT || null,
+      liveSince: out?.readyTime ?? null,
+      inKbps: receiveRate(out?.bytesReceived),
+      lanHost: lanHost(),
     },
   };
 }

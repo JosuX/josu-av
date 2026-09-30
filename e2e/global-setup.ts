@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, openSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { E2E } from "./env";
 
@@ -19,8 +20,13 @@ async function waitForStream(timeoutMs: number) {
   throw new Error("The test stream never became ready; check that mediamtx and ffmpeg (libx264, libopus) are installed");
 }
 
+/**
+ * Output goes to a file (in the temp dir) rather than a pipe: an unread pipe fills up and
+ * blocks the process, which froze the test stream a few minutes into a run.
+ */
 function run(bin: string, args: string[]): ChildProcess {
-  const child = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
+  const out = openSync(path.join(tmpdir(), `av-e2e-${bin}.log`), "w");
+  const child = spawn(bin, args, { stdio: ["ignore", out, out] });
   child.on("error", (e) => console.error(`[e2e] could not start ${bin}: ${e.message}`));
   return child;
 }

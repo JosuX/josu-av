@@ -8,6 +8,8 @@ export interface PathInfo {
   tracks: string[];
   readers: number;
   bytesReceived: number;
+  /** When the path became ready (ms since epoch), null while not ready. */
+  readyTime: number | null;
 }
 
 /**
@@ -29,6 +31,7 @@ export async function listPaths(): Promise<PathInfo[] | null> {
         tracks: string[];
         readers: unknown[];
         bytesReceived: number;
+        readyTime: string | null;
       }[];
     };
     return data.items.map((p) => ({
@@ -38,6 +41,7 @@ export async function listPaths(): Promise<PathInfo[] | null> {
       tracks: p.tracks ?? [],
       readers: p.readers?.length ?? 0,
       bytesReceived: p.bytesReceived ?? 0,
+      readyTime: p.readyTime ? Date.parse(p.readyTime) || null : null,
     }));
   } catch {
     return null;
@@ -54,5 +58,37 @@ export async function probePathReady(path: string): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+export interface WebRTCSession {
+  id: string;
+  /** "read" (a player), "publish" (e.g. OBS over WHIP), or "" while still negotiating. */
+  state: "read" | "publish" | "";
+  path: string;
+  remoteAddr: string;
+  created: number;
+}
+
+/** WebRTC sessions (players and publishers), or null when the API is unreachable. */
+export async function listWebRTCSessions(): Promise<WebRTCSession[] | null> {
+  try {
+    const res = await fetch(`${MEDIAMTX_API}/v3/webrtcsessions/list`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      items: { id: string; state: string; path: string; remoteAddr: string; created: string }[];
+    };
+    return data.items.map((s) => ({
+      id: s.id,
+      state: s.state === "read" || s.state === "publish" ? s.state : "",
+      path: s.path,
+      remoteAddr: s.remoteAddr,
+      created: Date.parse(s.created) || Date.now(),
+    }));
+  } catch {
+    return null;
   }
 }

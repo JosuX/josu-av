@@ -1,12 +1,15 @@
 import { procman, type LogLine, type ProcState } from "@/lib/procman";
 import { onShutdown } from "@/lib/shutdown";
 import { isProcName } from "@/lib/config";
+import { eventLogs } from "@/lib/eventlog";
+import { isEventLogName } from "@/lib/shared";
 
-// Server-Sent Events: backlog first, then live lines and state changes.
+// Server-Sent Events: backlog first, then live lines, plus state changes for a process.
 export async function GET(req: Request, ctx: RouteContext<"/api/logs/[name]">) {
   const { name } = await ctx.params;
-  if (!isProcName(name)) return new Response("unknown process", { status: 404 });
-  const proc = procman.get(name);
+  const proc = isProcName(name) ? procman.get(name) : isEventLogName(name) ? eventLogs[name] : null;
+  if (!proc) return new Response("unknown log", { status: 404 });
+  const state = "state" in proc ? proc.state : null;
   const encoder = new TextEncoder();
 
   let cleanup = () => {};
@@ -16,7 +19,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/logs/[name]">) {
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
 
       send("backlog", proc.lines);
-      send("state", proc.state);
+      if (state) send("state", state);
 
       const onLine = (l: LogLine) => send("line", l);
       const onState = (s: ProcState) => send("state", s);
@@ -59,4 +62,14 @@ export async function GET(req: Request, ctx: RouteContext<"/api/logs/[name]">) {
       Connection: "keep-alive",
     },
   });
+}
+
+/** Clear an event log (process logs are cleared through /api/process/<name>). */
+export async function POST(req: Request, ctx: RouteContext<"/api/logs/[name]">) {
+  const { name } = await ctx.params;
+  if (!isEventLogName(name)) return Response.json({ error: "unknown log" }, { status: 404 });
+  const { action } = ((await req.json().catch(() => ({}))) ?? {}) as { action?: unknown };
+  if (action !== "clear") return Response.json({ error: "unknown action" }, { status: 400 });
+  eventLogs[name].clearLogs();
+  return Response.json({ ok: true });
 }
