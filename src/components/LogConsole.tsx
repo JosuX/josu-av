@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { LOG_MAX_LINES } from "@/lib/shared";
 import { StateBadge } from "./StateBadge";
+import { Segmented } from "./motion";
 import { procAction } from "./hooks";
 import type { LogLine, ProcName, ProcState } from "./types";
 
@@ -157,18 +157,23 @@ export function LogConsole({ source, className }: { source: LogSource; className
             className="h-8 pl-8"
           />
         </div>
-        <ToggleGroup
-          type="single"
-          size="sm"
-          variant="outline"
+        <Segmented
+          aria-label="Show"
           value={filter}
-          onValueChange={(v) => v && setFilter(v as Filter)}
-        >
-          <ToggleGroupItem value="all">All</ToggleGroupItem>
-          <ToggleGroupItem value="issues">
-            Issues{issues ? <span className="ml-1 font-mono text-log-error">{issues}</span> : null}
-          </ToggleGroupItem>
-        </ToggleGroup>
+          onValueChange={(v) => setFilter(v as Filter)}
+          options={[
+            { value: "all", label: "All" },
+            {
+              value: "issues",
+              label: (
+                <>
+                  Issues{issues ? <span className="font-mono text-log-error">{issues}</span> : null}
+                </>
+              ),
+              ariaLabel: "Issues",
+            },
+          ]}
+        />
         <div className="hidden items-center gap-2 sm:flex">
           <Switch id={`${name}-ts`} checked={timestamps} onCheckedChange={setTimestamps} size="sm" />
           <Label htmlFor={`${name}-ts`} className="text-xs font-normal">Time</Label>

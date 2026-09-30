@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Loader2, Play, Square, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { ProcessCard } from "./ProcessCard";
 import { StreamCard } from "./StreamCard";
 import { SystemCharts } from "./SystemCharts";
 import { HealthAlerts } from "./HealthAlerts";
-import { ViewerHealthCard } from "./ViewerHealthCard";
-import { fetchStatus, procAction, useStatus } from "./hooks";
+import { KpiStrip } from "./KpiStrip";
+import { ViewersPanel } from "./ViewersPanel";
+import { Reveal } from "./motion";
+import { formatDuration } from "./format";
+import { fetchStatus, procAction, useNow, useStatus } from "./hooks";
 import type { ProcName, StatusPayload } from "./types";
 
 const READY_TIMEOUT_MS = 5000;
@@ -64,11 +68,11 @@ export function Dashboard() {
   };
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
-        <div>
+    <div className="flex flex-col gap-4 sm:gap-5">
+      <Reveal className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Assembly stream</h1>
-          <p className="hidden text-sm text-muted-foreground sm:block">Control the media server and the WebRTC feed.</p>
+          {status && <LiveStatus status={status} />}
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex">
           <Button variant="outline" onClick={stopAll} disabled={!status || bulk !== null || !anyActive}>
@@ -80,33 +84,93 @@ export function Dashboard() {
             Start all
           </Button>
         </div>
-      </div>
+      </Reveal>
 
-      {error && (
-        <Alert variant="destructive">
-          <WifiOff />
-          <AlertTitle>Lost contact with the control server</AlertTitle>
-          <AlertDescription>{error}. Retrying…</AlertDescription>
-        </Alert>
-      )}
-
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div role="alert" className="flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm">
+              <WifiOff className="size-4 shrink-0 text-destructive" />
+              <p>
+                <span className="font-medium">Lost contact with the control server.</span>{" "}
+                <span className="text-muted-foreground">{error}. Retrying…</span>
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {status && <HealthAlerts warnings={status.warnings} />}
 
-      <SystemCharts />
-
-      {/* Video first; process cards sit beside it from landscape tablets up, in a row below it on portrait tablets. */}
-      <div className="grid gap-4 lg:grid-cols-5">
-        <div className="min-w-0 lg:col-span-3">
-          {status ? <StreamCard status={status} /> : <Skeleton className="aspect-video w-full rounded-xl" />}
+      {status ? (
+        <KpiStrip status={status} />
+      ) : (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-[6.5rem] rounded-xl" />
+          ))}
         </div>
-        <div className="grid min-w-0 content-start gap-4 md:grid-cols-2 lg:col-span-2 lg:grid-cols-1">
+      )}
+
+      {/* The feed leads; viewers and services sit beside it on wide screens, below it on phones. */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Reveal index={2} className="min-w-0 lg:col-span-2">
+          {status ? <StreamCard status={status} /> : <Skeleton className="aspect-video w-full rounded-xl" />}
+        </Reveal>
+        <div className="flex min-w-0 flex-col gap-4">
+          {status?.abr && (
+            <Reveal index={3}>
+              <ViewersPanel abr={status.abr} onChange={refresh} />
+            </Reveal>
+          )}
           {status
-            ? procs.map((p) => <ProcessCard key={p.name} proc={p} onChange={refresh} />)
-            : [0, 1].map((i) => <Skeleton key={i} className="h-64 w-full rounded-xl" />)}
+            ? procs.map((p, i) => (
+                <Reveal key={p.name} index={4 + i}>
+                  <ProcessCard proc={p} onChange={refresh} />
+                </Reveal>
+              ))
+            : [0, 1].map((i) => <Skeleton key={i} className="h-32 w-full rounded-xl" />)}
         </div>
       </div>
 
-      {status?.abr && <ViewerHealthCard abr={status.abr} onChange={refresh} />}
+      <Reveal index={6} className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-muted-foreground">This machine</h2>
+        <SystemCharts />
+      </Reveal>
     </div>
+  );
+}
+
+/** LIVE with how long, or Offline. */
+function LiveStatus({ status }: { status: StatusPayload }) {
+  const now = useNow();
+  const { outputReady, liveSince } = status.stream;
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.span
+        key={outputReady ? "live" : "off"}
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        transition={{ duration: 0.2 }}
+        className={cn(
+          "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium",
+          outputReady ? "border-live/30 bg-live/10 text-live" : "text-muted-foreground",
+        )}
+      >
+        <span className="relative flex size-2">
+          {outputReady && <span className="absolute inline-flex size-full animate-ping rounded-full bg-live opacity-70" />}
+          <span className={cn("relative inline-flex size-2 rounded-full", outputReady ? "bg-live" : "bg-muted-foreground/60")} />
+        </span>
+        {outputReady ? "LIVE" : "Offline"}
+        {outputReady && liveSince && (
+          <span className="font-mono font-normal tabular-nums text-foreground/80">{formatDuration(now - liveSince)}</span>
+        )}
+      </motion.span>
+    </AnimatePresence>
   );
 }

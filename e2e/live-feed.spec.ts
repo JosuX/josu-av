@@ -30,17 +30,17 @@ test("the Live feed card switches between /assembly and /watch, with matching li
   await expect(card.getByRole("radio", { name: "/watch" })).toHaveAttribute("data-state", "on");
 });
 
-test("the Live feed card shows stream stats and a viewer breakdown", async ({ page }) => {
+test("the stat tiles show viewers, bitrate, picture and playback", async ({ page }) => {
   await page.goto("/");
-  const card = page.locator('[data-slot="card"]').filter({ hasText: "Live feed" });
-  await card.getByRole("radio", { name: "/assembly" }).click();
+  await page.locator('[data-slot="card"]').filter({ hasText: "Live feed" }).getByRole("radio", { name: "/assembly" }).click();
   await expectPlaying(page);
 
-  await expect(card.getByText("H264 · Opus")).toBeVisible();
-  await expect(card.locator("dd").filter({ hasText: /^\d+s$|^\d+m/ }).first()).toBeVisible(); // live for
-  await expect(card.locator("dd").filter({ hasText: /^\d+ kbps$/ }).first()).toBeVisible(); // bitrate in
-  await expect(card.getByText("640×360 @ 30")).toBeVisible(); // reported by the player
-  await expect(card.getByText(/^Dashboard\s*1$/)).toBeVisible();
+  await expect(page.getByText("LIVE", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("640×360").first()).toBeVisible(); // reported by the player
+  await expect(page.getByText(/30 fps · H264 · Opus/)).toBeVisible();
+  await expect(page.getByText(/^\d{1,3}(,\d{3})*kbps$/).first()).toBeVisible(); // bitrate in
+  await expect(page.getByText(/1 dashboard/)).toBeVisible();
+  await expect(page.getByText("All smooth")).toBeVisible({ timeout: 60_000 });
 });
 
 test("Share shows the viewer page's LAN link and a QR code", async ({ page }) => {

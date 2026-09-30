@@ -23,19 +23,19 @@ OBS ──RTMP──▶ MediaMTX /assembly ──RTSP──▶ FFmpeg (AAC → O
 
 ## Pages
 
-- **Dashboard** (`/`): live feed, start/stop/restart for each process, network and memory charts.
-  The live feed has two tabs: `/assembly` plays the path straight from MediaMTX, `/watch` embeds
-  the viewer page as viewers see it; the open-in-new-tab link follows the tab. Below it: how long
-  the stream has been live, the picture size, the bitrate MediaMTX receives (and OBS's target),
-  the codecs, and viewers split into dashboard, watch page, other players and struggling. The
-  share button shows the viewer page's LAN link with a QR code for phones.
+- **Dashboard** (`/`): a LIVE/offline badge with how long it's been live, four stat tiles
+  (viewers by page, bitrate received and OBS's target, picture size and codecs, playback
+  health), the live feed with `/assembly` and `/watch` tabs, share and open-in-new-tab, the
+  viewers list with each one's playback and any bitrate recommendation, MediaMTX with its
+  controls (command line under Details), and compact network and memory charts at the bottom.
 - **Log monitor** (`/logs`): live, filterable logs with download: each process's output, plus
   **Clients** (viewers joining and leaving with their address and page, each viewer's playback
   verdicts with the numbers behind them, and every WebRTC player or publisher MediaMTX sees),
   **OBS** (connection, stream starts/stops/reconnects, frame-drop warnings, and every change the
   panel or automation made, with camera passwords masked) and **Automation**.
-- **Settings** (`/settings`): the OBS media source URL (IP camera), the stream bitrate, and
-  switching OBS's stream service to WHIP.
+- **Settings** (`/settings`): sections for the camera URL, stream output (bitrate, x264 preset,
+  frame rate; unapplied changes collect in a bar at the bottom), automation and adaptive
+  bitrate, with a section nav that follows the page.
 - **Viewer page** (`/watch`, and the whole of port 8080): just the live video, for the audience.
   See [Viewer port](#viewer-port).
 
@@ -237,6 +237,12 @@ start and stop the stream, signal the external processes it detects, and change 
 trusted network, or restrict it with the host firewall.
 
 ## Development
+
+The UI uses shadcn/ui, [Motion](https://motion.dev) for animation (page transitions, sliding
+highlights, list and alert enter/exit; it follows the system's reduced-motion setting) and a few
+[React Bits](https://reactbits.dev) components in `src/components/reactbits` (CountUp, ShinyText,
+SpotlightCard, Aurora), adapted to the theme tokens.
+
 
 ```bash
 pnpm test        # unit tests (vitest)

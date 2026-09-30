@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ArrowDown, ArrowUp, MemoryStick, Network } from "lucide-react";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   ChartContainer,
   ChartTooltip,
@@ -55,31 +55,29 @@ export function SystemCharts() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Network className="size-4 text-muted-foreground" /> Network throughput
-          </CardTitle>
-          <CardDescription>Last 5 minutes · 1 s samples</CardDescription>
-          {last && (
-            <CardAction>
-              <Badge variant="secondary" className="font-mono">{last.iface}</Badge>
-            </CardAction>
-          )}
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-x-8 gap-y-3">
+      <Card className="gap-3 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
+            <Network className="size-4 text-muted-foreground" /> Network
+            {last && (
+              <Badge variant="secondary" className="font-mono text-[10px]">
+                {last.iface}
+              </Badge>
+            )}
+          </h3>
+          <div className="ml-auto flex gap-5">
             <Headline icon={<ArrowDown className="size-4" />} label="Download" color="var(--chart-1)" value={last ? formatBits(last.rxBps) : null} />
             <Headline icon={<ArrowUp className="size-4" />} label="Upload" color="var(--chart-2)" value={last ? formatBits(last.txBps) : null} />
           </div>
+        </div>
           {samples.length < 2 ? (
-            <Skeleton className="h-40 w-full sm:h-48 xl:h-56 2xl:h-64" />
+            <Skeleton className="h-28 w-full sm:h-32" />
           ) : (
-            <ChartContainer config={netConfig} className="aspect-auto h-40 w-full sm:h-48 xl:h-56 2xl:h-64">
+            <ChartContainer config={netConfig} className="aspect-auto h-28 w-full sm:h-32">
               <AreaChart data={samples} margin={{ left: 0, right: 4, top: 8 }}>
                 <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
-                <XAxis dataKey="ts" tickFormatter={formatClock} tickLine={false} axisLine={false} minTickGap={48} />
-                <YAxis tickFormatter={formatBits} tickLine={false} axisLine={false} width={64} />
+                <XAxis dataKey="ts" tickFormatter={formatClock} tickLine={false} axisLine={false} minTickGap={64} fontSize={10} />
+                <YAxis tickFormatter={formatBits} tickLine={false} axisLine={false} width={56} fontSize={10} />
                 <ChartTooltip
                   cursor
                   content={
@@ -103,18 +101,14 @@ export function SystemCharts() {
               </AreaChart>
             </ChartContainer>
           )}
-        </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MemoryStick className="size-4 text-muted-foreground" /> Memory usage
-          </CardTitle>
-          <CardDescription>Used = total − available</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-x-8 gap-y-3">
+      <Card className="gap-3 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
+            <MemoryStick className="size-4 text-muted-foreground" /> Memory
+          </h3>
+          <div className="ml-auto flex gap-5">
             <Headline
               label="Used"
               color="var(--chart-1)"
@@ -122,20 +116,22 @@ export function SystemCharts() {
             />
             <Headline label="Utilisation" value={last ? `${((last.memUsed / last.memTotal) * 100).toFixed(1)}%` : null} />
           </div>
+        </div>
           {samples.length < 2 ? (
-            <Skeleton className="h-40 w-full sm:h-48 xl:h-56 2xl:h-64" />
+            <Skeleton className="h-28 w-full sm:h-32" />
           ) : (
-            <ChartContainer config={memConfig} className="aspect-auto h-40 w-full sm:h-48 xl:h-56 2xl:h-64">
+            <ChartContainer config={memConfig} className="aspect-auto h-28 w-full sm:h-32">
               <AreaChart data={samples} margin={{ left: 0, right: 4, top: 8 }}>
                 <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
-                <XAxis dataKey="ts" tickFormatter={formatClock} tickLine={false} axisLine={false} minTickGap={48} />
+                <XAxis dataKey="ts" tickFormatter={formatClock} tickLine={false} axisLine={false} minTickGap={64} fontSize={10} />
                 <YAxis
                   domain={[0, last?.memTotal ?? "auto"]}
                   ticks={last ? memTicks(last.memTotal) : undefined}
                   tickFormatter={formatBytes}
                   tickLine={false}
                   axisLine={false}
-                  width={64}
+                  width={56}
+                  fontSize={10}
                 />
                 <ChartTooltip
                   cursor
@@ -158,7 +154,6 @@ export function SystemCharts() {
               </AreaChart>
             </ChartContainer>
           )}
-        </CardContent>
       </Card>
     </div>
   );
@@ -176,16 +171,16 @@ function Headline({
   icon?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <div className="flex flex-col items-end gap-0.5">
+      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         {color && <span className="h-2.5 w-1 rounded-sm" style={{ background: color }} />}
         {icon}
         {label}
       </span>
       {value === null ? (
-        <Skeleton className="h-7 w-24" />
+        <Skeleton className="h-5 w-20" />
       ) : (
-        <span className="font-mono text-lg font-semibold tabular-nums sm:text-xl 2xl:text-2xl">{value}</span>
+        <span className="font-mono text-sm font-semibold tabular-nums">{value}</span>
       )}
     </div>
   );
