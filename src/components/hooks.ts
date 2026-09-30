@@ -5,28 +5,57 @@ import { toast } from "sonner";
 import type { ProcAction } from "@/lib/shared";
 import type { ProcName, StatusPayload } from "./types";
 
-export function useStatus(intervalMs = 2000) {
-  const [status, setStatus] = useState<StatusPayload | null>(null);
+/** While the live stream is down, re-read the data this often. */
+const FALLBACK_POLL_MS = 3000;
+
+/**
+ * Data pushed live from /api/events/<topic>, with `refresh` to re-read it from `url` at once
+ * (e.g. right after an action). EventSource reconnects by itself after a drop; until it does,
+ * the data is polled from `url`, so the page keeps updating either way.
+ */
+export function useLive<T>(topic: string, url: string) {
+  const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      setStatus(await fetchStatus());
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
       setError(null);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, []);
+  }, [url]);
 
   useEffect(() => {
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const stopPolling = () => {
+      if (poll) clearInterval(poll);
+      poll = null;
+    };
     const first = setTimeout(refresh, 0);
-    const t = setInterval(refresh, intervalMs);
+    const es = new EventSource(`/api/events/${topic}`);
+    es.addEventListener("data", (e) => {
+      stopPolling();
+      setData(JSON.parse((e as MessageEvent<string>).data));
+      setError(null);
+    });
+    es.onerror = () => {
+      poll ??= setInterval(refresh, FALLBACK_POLL_MS);
+    };
     return () => {
       clearTimeout(first);
-      clearInterval(t);
+      stopPolling();
+      es.close();
     };
-  }, [refresh, intervalMs]);
+  }, [topic, refresh]);
 
+  return { data, setData, error, refresh };
+}
+
+export function useStatus() {
+  const { data: status, error, refresh } = useLive<StatusPayload>("status", "/api/status");
   return { status, error, refresh };
 }
 

@@ -1,27 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { VideoOff } from "lucide-react";
 import { VideoFeed } from "./VideoFeed";
+import { useLive } from "./hooks";
 import type { WatchPayload } from "@/lib/shared";
 
 /** The viewer page: the live video, or a notice until the stream starts. */
 export function WatchPlayer() {
-  const [state, setState] = useState<WatchPayload | null>(null);
-
-  useEffect(() => {
-    const check = () =>
-      fetch("/api/watch", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((s: WatchPayload | null) => s && setState(s))
-        .catch(() => {});
-    const first = setTimeout(check, 0);
-    const t = setInterval(check, 5000);
-    return () => {
-      clearTimeout(first);
-      clearInterval(t);
-    };
-  }, []);
+  const { data: state } = useLive<WatchPayload>("watch", "/api/watch");
 
   return (
     <div className="flex min-h-dvh flex-1 items-center justify-center bg-black p-[env(safe-area-inset-top)_env(safe-area-inset-right)_env(safe-area-inset-bottom)_env(safe-area-inset-left)]">

@@ -101,6 +101,12 @@ The commands themselves are defined in `src/lib/config.ts`.
 
 ## How it behaves
 
+- **Live updates.** Pages get their data pushed over Server-Sent Events (`/api/events/<topic>`
+  for `status`, `obs`, `automation` and `watch`) instead of polling. Each topic is computed once
+  for all open pages, only while someone is watching, and only sent when it changed; process
+  state changes and automation checks push at once. If the push connection drops, pages poll
+  every 3 s until it reconnects.
+
 - **Process supervision.** The panel spawns MediaMTX (and FFmpeg in RTMP mode) as child
   processes and keeps the last 3,000 log lines of each. MediaMTX restarts after a crash, waiting
   3 s and doubling up to 30 s; after 6 crashes in a row (each within 30 s of starting) it gives up
@@ -109,7 +115,8 @@ The commands themselves are defined in `src/lib/config.ts`.
 - **Player.** The dashboard's WebRTC player sends its offer after at most 250 ms of ICE
   gathering, asks the browser for no extra playout buffering, rides out brief network drops
   for 2 s, and otherwise reconnects with a backoff from 0.5 s up to 5 s.
-- **Shutdown.** Children get SIGTERM when the server exits normally. They are spawned through
+- **Shutdown.** Open event streams are closed as soon as the server gets SIGTERM/SIGINT, since
+  Next waits for open requests before exiting. Children get SIGTERM when the server exits normally. They are spawned through
   `setpriv --pdeathsig TERM` as well, so the kernel stops them even if the server is killed
   outright. Without `setpriv` a hard kill leaves them running; the panel then shows them as
   "running outside this app" and offers to stop them.

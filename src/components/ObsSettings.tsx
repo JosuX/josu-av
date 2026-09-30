@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { AppWindow, Camera, Gauge, Loader2, Play, PlugZap, RadioTower, RotateCw, Save, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
 import { BITRATE_MAX, BITRATE_MIN, FPS_OPTIONS, X264_PRESETS, fpsLabel, isValidBitrate } from "@/lib/shared";
 import { StateBadge } from "./StateBadge";
 import { AutomationCard } from "./AutomationCard";
+import { useLive } from "./hooks";
 import { formatBytes, formatDuration } from "./format";
 import type { ObsPayload } from "./types";
 
@@ -65,31 +66,13 @@ async function obsAction(body: Record<string, unknown>): Promise<ActionResult> {
 }
 
 export function ObsSettings() {
-  const [obs, setObs] = useState<ObsPayload | null>(null);
+  const { data: obs, refresh } = useLive<ObsPayload>("obs", "/api/obs");
   const [busy, setBusy] = useState<Busy>(null);
   // Drafts stay untouched by polling until saved or reset.
   const [urlDrafts, setUrlDrafts] = useState<Record<string, string>>({});
   const [bitrateDraft, setBitrateDraft] = useState<string | null>(null);
   const [presetDraft, setPresetDraft] = useState<string | null>(null);
   const [fpsDraft, setFpsDraft] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/obs", { cache: "no-store" });
-      setObs(await res.json());
-    } catch (e) {
-      setObs({ connected: false, error: (e as Error).message });
-    }
-  }, []);
-
-  useEffect(() => {
-    const first = setTimeout(refresh, 0);
-    const t = setInterval(refresh, 3000);
-    return () => {
-      clearTimeout(first);
-      clearInterval(t);
-    };
-  }, [refresh]);
 
   const run = async (kind: Exclude<Busy, null>, body: Record<string, unknown>, success?: string) => {
     setBusy(kind);

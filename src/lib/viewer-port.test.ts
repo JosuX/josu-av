@@ -8,6 +8,7 @@ describe("viewerRoute", () => {
     expect(viewerRoute("GET", "/watch?_rsc=abc")).toBe("forward");
     expect(viewerRoute("GET", "/_next/static/chunks/app.js")).toBe("forward");
     expect(viewerRoute("GET", "/api/watch")).toBe("forward");
+    expect(viewerRoute("GET", "/api/events/watch")).toBe("forward");
     expect(viewerRoute("POST", "/api/viewers")).toBe("forward");
   });
 
@@ -16,6 +17,9 @@ describe("viewerRoute", () => {
       ["GET", "/settings"],
       ["GET", "/logs"],
       ["GET", "/api/status"],
+      ["GET", "/api/events/status"],
+      ["GET", "/api/events/obs"],
+      ["GET", "/api/events/automation"],
       ["GET", "/api/logs/mediamtx"],
       ["POST", "/api/process/mediamtx"],
       ["POST", "/api/obs"],

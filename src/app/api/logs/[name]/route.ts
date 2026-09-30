@@ -1,4 +1,5 @@
 import { procman, type LogLine, type ProcState } from "@/lib/procman";
+import { onShutdown } from "@/lib/shutdown";
 import { isProcName } from "@/lib/config";
 
 // Server-Sent Events: backlog first, then live lines and state changes.
@@ -26,11 +27,19 @@ export async function GET(req: Request, ctx: RouteContext<"/api/logs/[name]">) {
       proc.on("state", onState);
       proc.on("clear", onClear);
       cleanup = () => {
+        offShutdown();
         clearInterval(ping);
         proc.off("line", onLine);
         proc.off("state", onState);
         proc.off("clear", onClear);
       };
+      // Ends the stream when the server stops, so shutdown doesn't wait on it.
+      const offShutdown = onShutdown(() => {
+        cleanup();
+        try {
+          controller.close();
+        } catch {}
+      });
       req.signal.addEventListener("abort", () => {
         cleanup();
         try {

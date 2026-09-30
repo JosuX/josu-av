@@ -3,6 +3,7 @@ import http from "node:http";
 import net from "node:net";
 import type { Duplex } from "node:stream";
 import { VIEWER_PORT } from "./config";
+import { onShutdown } from "./shutdown";
 
 // A second port for viewers that reaches only the watch page and what it needs; everything
 // else, including every control endpoint, gets a 404. Requests that pass are forwarded to the
@@ -21,7 +22,8 @@ export function viewerRoute(method: string, url: string): ViewerRoute {
   if (/\.\.|%2e|%2f|%5c|\\|\/\//i.test(path)) return "deny";
   if (method === "GET" || method === "HEAD") {
     if (path === "/") return "redirect";
-    if (path === "/watch" || path === "/api/watch" || path === "/favicon.ico") return "forward";
+    if (path === "/watch" || path === "/api/watch" || path === "/api/events/watch" || path === "/favicon.ico")
+      return "forward";
     if (path.startsWith("/_next/static/")) return "forward";
     // Dev server only: fonts and the hot-reload channel.
     if (DEV && (path.startsWith("/__nextjs_font/") || DEV_HMR_PATHS.includes(path))) return "forward";
@@ -65,8 +67,14 @@ const handlers: Handlers = {
       },
     );
     upstream.on("error", () => {
+      if (res.writableEnded) return;
       if (!res.headersSent) res.writeHead(502, { "Content-Type": "text/plain" });
       res.end("The stream page is unavailable");
+    });
+    // A viewer that goes away must not leave its request (e.g. an event stream) open on the
+    // panel, or the panel can't shut down.
+    res.on("close", () => {
+      if (!res.writableFinished) upstream.destroy();
     });
     req.pipe(upstream);
   },
@@ -91,6 +99,13 @@ const handlers: Handlers = {
 };
 
 const g = globalThis as unknown as { __avViewerPort?: { server: http.Server; handlers: Handlers } };
+
+// Stop accepting viewers when the panel stops, and drop the ones still connected.
+onShutdown(() => {
+  const s = g.__avViewerPort?.server;
+  s?.close();
+  s?.closeAllConnections();
+});
 
 /**
  * Open the viewer port once per server process; AV_VIEWER_PORT=0 turns it off. The server

@@ -1,4 +1,5 @@
 import { stats, type StatSample } from "@/lib/sysstats";
+import { onShutdown } from "@/lib/shutdown";
 
 // Server-Sent Events: recent history, then one sample per second.
 export async function GET(req: Request) {
@@ -14,7 +15,17 @@ export async function GET(req: Request) {
       send("history", stats.history);
       const onSample = (s: StatSample) => send("sample", s);
       stats.on("sample", onSample);
-      cleanup = () => stats.off("sample", onSample);
+      cleanup = () => {
+        offShutdown();
+        stats.off("sample", onSample);
+      };
+      // Ends the stream when the server stops, so shutdown doesn't wait on it.
+      const offShutdown = onShutdown(() => {
+        cleanup();
+        try {
+          controller.close();
+        } catch {}
+      });
       req.signal.addEventListener("abort", () => {
         cleanup();
         try {

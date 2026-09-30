@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Bot, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { BITRATE_MAX, BITRATE_MIN, isValidBitrate } from "@/lib/shared";
 import type { AutomationEvent, AutomationPayload, AutomationSettings, BitrateMode } from "./types";
+import { useLive } from "./hooks";
 
 type Switchable = "keepStreamLive" | "reconnectCameras" | "keepWhip" | "launchObs";
 
@@ -98,27 +99,9 @@ const EVENT_COLOR: Record<AutomationEvent["level"], string> = {
 };
 
 export function AutomationCard() {
-  const [data, setData] = useState<AutomationPayload | null>(null);
+  const { data, setData } = useLive<AutomationPayload>("automation", "/api/automation");
   const [saving, setSaving] = useState<keyof AutomationSettings | null>(null);
   const [minDraft, setMinDraft] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/automation", { cache: "no-store" });
-      if (res.ok) setData(await res.json());
-    } catch {
-      // The dashboard shows lost contact; keep the last data here.
-    }
-  }, []);
-
-  useEffect(() => {
-    const first = setTimeout(refresh, 0);
-    const t = setInterval(refresh, 3000);
-    return () => {
-      clearTimeout(first);
-      clearInterval(t);
-    };
-  }, [refresh]);
 
   const save = async <K extends keyof AutomationSettings>(key: K, value: AutomationSettings[K]) => {
     setSaving(key);

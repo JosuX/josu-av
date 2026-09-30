@@ -176,6 +176,7 @@ class Supervisor {
   private warningsById = new Map<string, HealthWarning>();
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
+  private tickListeners = new Set<() => void>();
   private seq = 0;
 
   private keepLive = { failures: 0, nextAt: 0 };
@@ -197,6 +198,12 @@ class Supervisor {
     this.timer = setInterval(() => void this.tick(), TICK_MS);
     this.timer.unref();
     void this.tick();
+  }
+
+  /** Called after every check; returns an unsubscribe function. */
+  onTick(fn: () => void) {
+    this.tickListeners.add(fn);
+    return () => this.tickListeners.delete(fn);
   }
 
   get warnings(): HealthWarning[] {
@@ -251,6 +258,7 @@ class Supervisor {
       console.error("[automation] check failed", e);
     } finally {
       this.ticking = false;
+      for (const fn of this.tickListeners) fn();
     }
   }
 

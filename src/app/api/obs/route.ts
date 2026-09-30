@@ -1,22 +1,17 @@
 import {
   ObsBusyError,
   ObsError,
-  getEncoder,
+  applyOutput,
   getSavedBitrate,
-  getStreamService,
-  getStreamStatus,
-  listNetworkSources,
   markEncoderLog,
   restartStream,
-  applyOutput,
   setSourceUrl,
-  stoppedByPanel,
   switchToWhip,
   waitForEncoderStart,
   withObs,
-  type ObsPayload,
 } from "@/lib/obs";
-import { INGEST, WHIP_URL } from "@/lib/config";
+import { INGEST } from "@/lib/config";
+import { getObsPayload } from "@/lib/payloads";
 import { ObsLaunchError, launchObs } from "@/lib/obs-launch";
 import { parseOutputPatch } from "@/lib/shared";
 const URL_SCHEMES = ["rtsp:", "rtsps:", "rtmp:", "rtmps:", "http:", "https:", "srt:", "udp:", "rtp:"];
@@ -27,23 +22,7 @@ function fail(e: unknown) {
 }
 
 export async function GET() {
-  try {
-    const [sources, encoder, stream, service] = await withObs((obs) =>
-      Promise.all([listNetworkSources(obs), getEncoder(obs), getStreamStatus(obs), getStreamService(obs)]),
-    );
-    const whipUrl = INGEST === "whip" ? WHIP_URL : null;
-    return Response.json({
-      connected: true,
-      sources,
-      encoder,
-      stream,
-      service,
-      whipUrl,
-      stoppedByPanel: stoppedByPanel(stream),
-    } satisfies ObsPayload);
-  } catch (e) {
-    return Response.json({ connected: false, error: (e as Error).message } satisfies ObsPayload);
-  }
+  return Response.json(await getObsPayload());
 }
 
 type Body =
