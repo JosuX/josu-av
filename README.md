@@ -89,6 +89,9 @@ variables:
 | `AV_OBS_WS_PASSWORD` | *(read from OBS's config)* | obs-websocket password |
 | `AV_OBS_CONFIG_DIR` | `$XDG_CONFIG_HOME/obs-studio` | OBS config directory (profiles, logs, websocket config) |
 | `AV_PDEATHSIG` | `1` | Set to `0` to spawn children directly instead of through `setpriv` |
+| `AV_OBS_BIN` | `obs` | OBS binary, for **Launch OBS** |
+| `AV_OBS_ARGS` | *(none)* | Extra OBS arguments when the panel launches it, e.g. `--minimize-to-tray` |
+| `AV_OBS_PROCESS` | *(binary name)* | Process name used to tell whether OBS is running (`pgrep -x`) |
 | `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` | Where the automation switches are saved (`automation.json`) |
 
 The commands themselves are defined in `src/lib/config.ts`.
@@ -125,6 +128,14 @@ A background supervisor runs every 3 s from server start (`src/instrumentation.t
 not a browser is open. Its switches are on the Settings page and are saved across restarts;
 what it does is listed there under **Recent activity** and in the server log (`[automation]`).
 
+- **Launch OBS** (off by default). When MediaMTX is up and OBS isn't running, opens OBS on the
+  desktop, with `--startstreaming` if Keep stream live is on. It runs as its own systemd unit
+  (`uwsm app`, else `systemd-run --user`), so restarting the panel doesn't close it. Before
+  launching it deletes the crash markers in `obs-studio/.sentinel`, which would otherwise make
+  OBS ask about Safe Mode (which disables the WebSocket server) and wait for an answer. It
+  needs someone logged in to the desktop, gives up after 3 launches that don't stay connected
+  for a minute, and must be turned off before closing OBS on purpose. The Settings page also
+  has a one-off **Launch OBS** button while OBS is disconnected.
 - **Keep stream live** (off by default). Starts OBS's stream whenever it is off, once MediaMTX is
   up. Failed starts are retried after 5 s, doubling up to a minute, and it gives up after 5.
   Turn it off before ending the stream, or it will start it again.

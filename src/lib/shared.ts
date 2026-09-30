@@ -33,9 +33,11 @@ export interface AutomationSettings {
   reconnectCameras: boolean;
   /** Point OBS back at the WHIP endpoint while the stream is idle (WHIP ingest only). */
   keepWhip: boolean;
+  /** Open OBS when MediaMTX is up and OBS isn't running. */
+  launchObs: boolean;
 }
 
-export const AUTOMATION_KEYS = ["keepStreamLive", "reconnectCameras", "keepWhip"] as const satisfies readonly (keyof AutomationSettings)[];
+export const AUTOMATION_KEYS = ["keepStreamLive", "reconnectCameras", "keepWhip", "launchObs"] as const satisfies readonly (keyof AutomationSettings)[];
 
 /** A problem the operator should know about, shown on the dashboard while it lasts. */
 export interface HealthWarning {

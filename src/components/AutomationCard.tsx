@@ -12,6 +12,12 @@ import type { AutomationEvent, AutomationPayload, AutomationSettings } from "./t
 
 const OPTIONS: { key: keyof AutomationSettings; label: string; description: string; whipOnly?: boolean }[] = [
   {
+    key: "launchObs",
+    label: "Launch OBS",
+    description:
+      "Opens OBS on the desktop when MediaMTX is running and OBS isn't. Needs someone logged in to the desktop. Turn this off before closing OBS.",
+  },
+  {
     key: "keepStreamLive",
     label: "Keep stream live",
     description:

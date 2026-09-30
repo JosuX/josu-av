@@ -14,6 +14,7 @@ export const DEFAULT_AUTOMATION: AutomationSettings = {
   keepStreamLive: false,
   reconnectCameras: true,
   keepWhip: true,
+  launchObs: false,
 };
 
 /** Defaults overlaid with every boolean setting found in `raw`. */

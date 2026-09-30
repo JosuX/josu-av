@@ -115,3 +115,9 @@ export const OBS_WS_URL = process.env.AV_OBS_WS_URL ?? "ws://127.0.0.1:4455";
 export const OBS_WS_PASSWORD = process.env.AV_OBS_WS_PASSWORD;
 export const OBS_CONFIG_DIR =
   process.env.AV_OBS_CONFIG_DIR ?? `${process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`}/obs-studio`;
+
+/** OBS binary, and extra arguments for when the panel launches it. */
+export const OBS_BIN = process.env.AV_OBS_BIN ?? "obs";
+export const OBS_EXTRA_ARGS = (process.env.AV_OBS_ARGS ?? "").split(/\s+/).filter(Boolean);
+/** Process name OBS runs under (pgrep -x). */
+export const OBS_PROCESS = process.env.AV_OBS_PROCESS ?? OBS_BIN.split("/").pop()!;

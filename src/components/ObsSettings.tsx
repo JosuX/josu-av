@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Camera, Gauge, Loader2, Play, PlugZap, RadioTower, RotateCw, Save, TriangleAlert } from "lucide-react";
+import { AppWindow, Camera, Gauge, Loader2, Play, PlugZap, RadioTower, RotateCw, Save, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ import { AutomationCard } from "./AutomationCard";
 import { formatBytes, formatDuration } from "./format";
 import type { ObsPayload } from "./types";
 
-type Busy = "url" | "bitrate" | "restart" | "whip" | null;
+type Busy = "url" | "bitrate" | "restart" | "whip" | "launch" | null;
 
 type ActionResult = { ok: true; effectiveBitrate?: number | null; savedBitrate?: number | null } | null;
 
@@ -108,6 +108,16 @@ export function ObsSettings() {
               In OBS open <strong>Tools → WebSocket Server Settings</strong> and tick{" "}
               <strong>Enable WebSocket server</strong>. The password is read from OBS&apos;s config automatically.
             </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              disabled={busy !== null}
+              onClick={() => run("launch", { action: "launch" }, "Opening OBS…")}
+            >
+              {busy === "launch" ? <Loader2 className="animate-spin" /> : <AppWindow />}
+              Launch OBS
+            </Button>
           </AlertDescription>
         </Alert>
       </Layout>

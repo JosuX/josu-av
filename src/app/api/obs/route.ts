@@ -17,6 +17,7 @@ import {
   type ObsPayload,
 } from "@/lib/obs";
 import { INGEST, WHIP_URL } from "@/lib/config";
+import { ObsLaunchError, launchObs } from "@/lib/obs-launch";
 import { BITRATE_MAX, BITRATE_MIN, isValidBitrate } from "@/lib/shared";
 const URL_SCHEMES = ["rtsp:", "rtsps:", "rtmp:", "rtmps:", "http:", "https:", "srt:", "udp:", "rtp:"];
 
@@ -49,7 +50,8 @@ type Body =
   | { action: "set-source-url"; input: string; url: string }
   | { action: "set-bitrate"; bitrate: number; restart?: boolean }
   | { action: "restart-stream" }
-  | { action: "use-whip" };
+  | { action: "use-whip" }
+  | { action: "launch" };
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
@@ -112,6 +114,13 @@ export async function POST(req: Request) {
         await withObs(switchToWhip);
       } catch (e) {
         return fail(e);
+      }
+      break;
+    case "launch":
+      try {
+        await launchObs({ startStreaming: false });
+      } catch (e) {
+        return Response.json({ error: (e as Error).message }, { status: e instanceof ObsLaunchError ? 409 : 500 });
       }
       break;
     default:

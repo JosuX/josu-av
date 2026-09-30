@@ -21,6 +21,7 @@ import {
   type StreamStatus,
 } from "./obs";
 import { procman } from "./procman";
+import { displayEnv, isObsRunning, launchObs } from "./obs-launch";
 import { loadAutomationSettings, saveAutomationSettings } from "./automation-settings";
 import type { AutomationEvent, AutomationPayload, AutomationSettings, HealthWarning } from "./shared";
 
@@ -45,6 +46,12 @@ const CAMERA_RELOAD_EVERY_MS = 30_000;
 const QUALITY_WINDOW_MS = 15_000;
 const DROP_WARN_RATIO = 0.02;
 const CONGESTION_WARN = 0.5;
+
+/** Launch OBS: time to let it open before trying again, attempts before giving up, and how
+ * long it must stay connected for the attempts to count from zero again. */
+const OBS_LAUNCH_WAIT_MS = 30_000;
+const OBS_LAUNCH_GIVE_UP = 3;
+const OBS_STABLE_MS = 60_000;
 
 /** Switching OBS back to WHIP is retried at most this often. */
 const WHIP_RETRY_MS = 30_000;
@@ -155,6 +162,7 @@ class Supervisor {
   private cameras = new Map<string, { state: string; since: number; lastReload: number }>();
   private frames: FrameSample[] = [];
   private lastWhipAttempt = 0;
+  private obsLaunch = { attempts: 0, nextAt: 0, connectedSince: 0 };
 
   ensureRunning() {
     if (this.timer) return;
@@ -187,6 +195,7 @@ class Supervisor {
     // Re-arm after an operator's change, e.g. after fixing whatever made keep-live give up.
     this.keepLive = { failures: 0, nextAt: 0 };
     this.lastWhipAttempt = 0;
+    this.obsLaunch = { attempts: 0, nextAt: 0, connectedSince: 0 };
     await saveAutomationSettings(next);
     void this.tick();
   }
@@ -230,9 +239,14 @@ class Supervisor {
     try {
       await withObs((obs) => this.checkObs(obs, add, out, mtxReady));
       this.obsConnected = true;
+      const l = this.obsLaunch;
+      l.connectedSince ||= Date.now();
+      if (Date.now() - l.connectedSince >= OBS_STABLE_MS) l.attempts = 0;
     } catch (e) {
       if (this.obsConnected) this.event("warning", `Lost contact with OBS: ${(e as Error).message}`);
       this.obsConnected = false;
+      this.obsLaunch.connectedSince = 0;
+      if (this.settings.launchObs) await this.maybeLaunchObs(add, mtxReady, Date.now());
       this.frames = [];
       for (const w of codecWarnings(null, out?.ready ? out.tracks : [])) add(w);
       if (this.settings.keepStreamLive)
@@ -242,6 +256,50 @@ class Supervisor {
           title: "OBS is not reachable",
           detail: "Keep stream live can't start the stream until OBS is running with its WebSocket server enabled.",
         });
+    }
+  }
+
+  /** Open OBS when MediaMTX is up and OBS is neither running nor reachable. */
+  private async maybeLaunchObs(add: (w: HealthWarning) => void, mtxReady: boolean, now: number) {
+    const l = this.obsLaunch;
+    if (!mtxReady) return;
+    if (await isObsRunning()) {
+      // Give a freshly launched OBS time to open its WebSocket server before complaining.
+      if (now >= l.nextAt)
+        add({
+          id: "obs-no-websocket",
+          level: "warning",
+          title: "OBS is running but the panel can't connect to it",
+          detail: "In OBS open Tools → WebSocket Server Settings and tick Enable WebSocket server.",
+        });
+      return;
+    }
+    if (!(await displayEnv())) {
+      add({
+        id: "obs-launch",
+        level: "error",
+        title: "Can't launch OBS",
+        detail: "There is no desktop session to open it on. Log in to the desktop.",
+      });
+      return;
+    }
+    if (l.attempts >= OBS_LAUNCH_GIVE_UP) {
+      add({
+        id: "obs-launch",
+        level: "error",
+        title: "OBS keeps closing",
+        detail: `Launch OBS gave up after ${OBS_LAUNCH_GIVE_UP} attempts. Open OBS by hand to see what's wrong, or turn the setting off and on to try again.`,
+      });
+      return;
+    }
+    if (now < l.nextAt) return;
+    l.attempts++;
+    l.nextAt = now + OBS_LAUNCH_WAIT_MS;
+    try {
+      const how = await launchObs({ startStreaming: this.settings.keepStreamLive });
+      this.event("info", `Launched OBS (attempt ${l.attempts}): ${how}`);
+    } catch (e) {
+      this.event("error", `Could not launch OBS: ${(e as Error).message}`);
     }
   }
 
@@ -405,6 +463,7 @@ const LABELS: Record<keyof AutomationSettings, string> = {
   keepStreamLive: "Keep stream live",
   reconnectCameras: "Reconnect cameras",
   keepWhip: "Keep OBS on WHIP",
+  launchObs: "Launch OBS",
 };
 
 const g = globalThis as unknown as { __avSupervisor?: Supervisor };
