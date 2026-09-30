@@ -3,16 +3,20 @@ import {
   ObsError,
   getEncoder,
   getSavedBitrate,
+  getStreamService,
   getStreamStatus,
   listNetworkSources,
   markEncoderLog,
   restartStream,
   setBitrate,
   setSourceUrl,
+  stoppedByPanel,
+  switchToWhip,
   waitForEncoderStart,
   withObs,
   type ObsPayload,
 } from "@/lib/obs";
+import { INGEST, WHIP_URL } from "@/lib/config";
 import { BITRATE_MAX, BITRATE_MIN, isValidBitrate } from "@/lib/shared";
 const URL_SCHEMES = ["rtsp:", "rtsps:", "rtmp:", "rtmps:", "http:", "https:", "srt:", "udp:", "rtp:"];
 
@@ -23,10 +27,19 @@ function fail(e: unknown) {
 
 export async function GET() {
   try {
-    const [sources, encoder, stream] = await withObs((obs) =>
-      Promise.all([listNetworkSources(obs), getEncoder(obs), getStreamStatus(obs)]),
+    const [sources, encoder, stream, service] = await withObs((obs) =>
+      Promise.all([listNetworkSources(obs), getEncoder(obs), getStreamStatus(obs), getStreamService(obs)]),
     );
-    return Response.json({ connected: true, sources, encoder, stream } satisfies ObsPayload);
+    const whipUrl = INGEST === "whip" ? WHIP_URL : null;
+    return Response.json({
+      connected: true,
+      sources,
+      encoder,
+      stream,
+      service,
+      whipUrl,
+      stoppedByPanel: stoppedByPanel(stream),
+    } satisfies ObsPayload);
   } catch (e) {
     return Response.json({ connected: false, error: (e as Error).message } satisfies ObsPayload);
   }
@@ -35,7 +48,8 @@ export async function GET() {
 type Body =
   | { action: "set-source-url"; input: string; url: string }
   | { action: "set-bitrate"; bitrate: number; restart?: boolean }
-  | { action: "restart-stream" };
+  | { action: "restart-stream" }
+  | { action: "use-whip" };
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
@@ -88,6 +102,14 @@ export async function POST(req: Request) {
     case "restart-stream":
       try {
         await withObs(restartStream);
+      } catch (e) {
+        return fail(e);
+      }
+      break;
+    case "use-whip":
+      if (INGEST !== "whip") return Response.json({ error: "The panel is in RTMP ingest mode" }, { status: 400 });
+      try {
+        await withObs(switchToWhip);
       } catch (e) {
         return fail(e);
       }

@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { OBS_CONFIG_DIR, OBS_WS_PASSWORD, OBS_WS_URL } from "./config";
+import { OBS_CONFIG_DIR, OBS_WS_PASSWORD, OBS_WS_URL, WHIP_URL } from "./config";
 
 // Minimal obs-websocket v5 client. One connection is opened on first use and shared by
 // every request until OBS closes it (e.g. OBS quits); the next request then reconnects.
@@ -354,26 +354,128 @@ async function waitForStream(obs: ObsSession, active: boolean, timeoutMs = 15000
   throw new ObsError(`Stream did not ${active ? "start" : "stop"} within ${timeoutMs / 1000}s`);
 }
 
-let restarting = false;
+// Shared across hot reloads and route bundles, like the connection.
+const state = ((globalThis as unknown as { __avObsState?: ObsState }).__avObsState ??= {
+  restarting: false,
+  stoppedByPanel: null,
+});
 
-/** Stop the stream if it is live, then start it (which picks up new encoder settings). */
-export async function restartStream(obs: ObsSession) {
-  if (restarting) throw new ObsBusyError("A stream restart is already in progress");
-  restarting = true;
+interface ObsState {
+  /** A stop/start cycle is in progress. */
+  restarting: boolean;
+  /** Set when the panel stopped the stream and could not start it again; cleared once it is live. */
+  stoppedByPanel: string | null;
+}
+
+const START_RETRY_DELAY_MS = 2000;
+
+/** Start the stream, retrying once, and remember a failure so the UI can say the stream is off. */
+async function startStream(obs: ObsSession) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, START_RETRY_DELAY_MS));
+    try {
+      // A start that timed out may still have gone through.
+      if (!(await getStreamStatus(obs)).active) {
+        await obs.call("StartStream");
+        await waitForStream(obs, true);
+      }
+      state.stoppedByPanel = null;
+      return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  const reason = (lastError as Error).message;
+  state.stoppedByPanel = reason;
+  throw new ObsError(`The stream is OFF: OBS stopped but did not start again (${reason})`);
+}
+
+/**
+ * Run `change` with the stream stopped, then start it again. The stream is restarted even
+ * if `change` fails, so a bad setting never leaves the assembly without a feed.
+ */
+async function withStreamStopped(obs: ObsSession, change: () => Promise<void>, { startIfIdle = false } = {}) {
+  if (state.restarting) throw new ObsBusyError("A stream restart is already in progress");
+  state.restarting = true;
   try {
-    if ((await getStreamStatus(obs)).active) {
+    const wasActive = (await getStreamStatus(obs)).active;
+    if (wasActive) {
       await obs.call("StopStream");
       await waitForStream(obs, false);
     }
-    await obs.call("StartStream");
-    await waitForStream(obs, true);
+    let changeError: unknown = null;
+    try {
+      await change();
+    } catch (e) {
+      changeError = e;
+    }
+    if (wasActive || startIfIdle) await startStream(obs);
+    if (changeError) throw changeError;
   } finally {
-    restarting = false;
+    state.restarting = false;
   }
+}
+
+/** Stop the stream if it is live, then start it (which picks up new encoder settings). */
+export async function restartStream(obs: ObsSession) {
+  await withStreamStopped(obs, async () => {}, { startIfIdle: true });
+}
+
+/**
+ * Why the stream is off after the panel failed to restart it, or null. Cleared once the
+ * stream is live again, including when it was started from OBS itself.
+ */
+export function stoppedByPanel(stream: StreamStatus): string | null {
+  if (stream.active) state.stoppedByPanel = null;
+  return state.stoppedByPanel;
+}
+
+// ---------------------------------------------------------------------------
+// Stream service (where OBS publishes)
+
+export interface StreamService {
+  /** e.g. "rtmp_custom", "whip_custom". */
+  type: string;
+  server: string | null;
+}
+
+export async function getStreamService(obs: ObsSession): Promise<StreamService> {
+  const r = await obs.call<{ streamServiceType: string; streamServiceSettings: { server?: string } | null }>(
+    "GetStreamServiceSettings",
+  );
+  return { type: r.streamServiceType, server: r.streamServiceSettings?.server ?? null };
+}
+
+export function isWhipService(s: StreamService) {
+  return s.type === "whip_custom" && s.server === WHIP_URL;
+}
+
+/**
+ * Point OBS at MediaMTX's WHIP endpoint. OBS refuses to change the service while
+ * streaming, so a live stream is stopped first and started again afterwards.
+ */
+export async function switchToWhip(obs: ObsSession) {
+  await withStreamStopped(obs, async () => {
+    await obs.call("SetStreamServiceSettings", {
+      streamServiceType: "whip_custom",
+      streamServiceSettings: { server: WHIP_URL, bearer_token: "" },
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
 
 export type ObsPayload =
   | { connected: false; error: string }
-  | { connected: true; sources: NetworkSource[]; encoder: EncoderInfo; stream: StreamStatus };
+  | {
+      connected: true;
+      sources: NetworkSource[];
+      encoder: EncoderInfo;
+      stream: StreamStatus;
+      service: StreamService;
+      /** WHIP endpoint OBS should publish to; null in RTMP ingest mode. */
+      whipUrl: string | null;
+      /** Set when the panel stopped the stream and could not start it again. */
+      stoppedByPanel: string | null;
+    };

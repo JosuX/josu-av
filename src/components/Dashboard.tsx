@@ -66,7 +66,7 @@ export function Dashboard() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Assembly stream</h1>
-          <p className="hidden text-sm text-muted-foreground sm:block">Control the media server and the WebRTC transcode.</p>
+          <p className="hidden text-sm text-muted-foreground sm:block">Control the media server and the WebRTC feed.</p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex">
           <Button variant="outline" onClick={stopAll} disabled={!status || bulk !== null || !anyActive}>

@@ -34,19 +34,21 @@ export function LogMonitor({
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Log monitor</h1>
           <p className="hidden text-sm text-muted-foreground sm:block">Live output from processes started by this panel.</p>
         </div>
-        <ToggleGroup type="single" variant="outline" size="sm" value={view} onValueChange={change} className="w-full sm:w-auto [&>*]:flex-1">
-          <ToggleGroupItem value="split" aria-label="Split view">
-            <Columns2 /> {procs.length === 2 ? "Both" : "All"}
-          </ToggleGroupItem>
-          {procs.map((p) => (
-            <ToggleGroupItem key={p.name} value={p.name}>
-              <Square /> {p.label}
+        {procs.length > 1 && (
+          <ToggleGroup type="single" variant="outline" size="sm" value={view} onValueChange={change} className="w-full sm:w-auto [&>*]:flex-1">
+            <ToggleGroupItem value="split" aria-label="Split view">
+              <Columns2 /> {procs.length === 2 ? "Both" : "All"}
             </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+            {procs.map((p) => (
+              <ToggleGroupItem key={p.name} value={p.name}>
+                <Square /> {p.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        )}
       </div>
 
-      <div className={view === "split" ? "grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-2" : "flex lg:min-h-0 lg:flex-1"}>
+      <div className={view === "split" && procs.length > 1 ? "grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-2" : "flex lg:min-h-0 lg:flex-1"}>
         {shown.map((p) => (
           <LogConsole
             key={p.name}

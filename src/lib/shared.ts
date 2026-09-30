@@ -30,6 +30,8 @@ export interface StatusPayload {
   processes: ProcStatus[];
   paths: PathInfo[] | null;
   stream: {
+    /** "whip": OBS publishes Opus straight to `input` (== `output`); "rtmp": FFmpeg bridges them. */
+    ingest: "whip" | "rtmp";
     input: string;
     output: string;
     inputReady: boolean | null;

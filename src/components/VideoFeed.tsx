@@ -6,6 +6,14 @@ import { Button } from "@/components/ui/button";
 
 type Phase = "connecting" | "playing" | "error";
 
+/** How long to wait for ICE gathering before sending the offer. Host candidates on a LAN take a few ms. */
+const ICE_GATHER_MS = 250;
+/** A "disconnected" peer connection often recovers by itself; only reconnect if it doesn't within this. */
+const DISCONNECT_GRACE_MS = 2000;
+/** Reconnect backoff: 500 ms, doubling up to 5 s, reset once playing. */
+const RETRY_MIN_MS = 500;
+const RETRY_MAX_MS = 5000;
+
 /** Minimal WHEP player for a MediaMTX WebRTC path. */
 export function VideoFeed({ path, port }: { path: string; port: number }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -13,6 +21,7 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(true);
   const [attempt, setAttempt] = useState(0);
+  const failures = useRef(0);
 
   useEffect(() => {
     const endpoint = `${location.protocol}//${location.hostname}:${port}/${path}/whep`;
@@ -20,26 +29,35 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
     let sessionUrl: string | null = null;
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let grace: ReturnType<typeof setTimeout> | undefined;
 
     const fail = (msg: string) => {
-      if (cancelled) return;
+      if (cancelled || retry) return;
       setPhase("error");
       setError(msg);
-      retry = setTimeout(() => setAttempt((a) => a + 1), 3000);
+      const delay = Math.min(RETRY_MIN_MS * 2 ** failures.current, RETRY_MAX_MS);
+      failures.current++;
+      retry = setTimeout(() => setAttempt((a) => a + 1), delay);
     };
 
     pc.addTransceiver("video", { direction: "recvonly" });
     pc.addTransceiver("audio", { direction: "recvonly" });
     pc.ontrack = (ev) => {
+      // Play as soon as frames arrive instead of building up a playout buffer (LAN, low jitter).
+      if ("jitterBufferTarget" in ev.receiver) ev.receiver.jitterBufferTarget = 0;
       const v = videoRef.current;
       if (v && ev.streams[0] && v.srcObject !== ev.streams[0]) v.srcObject = ev.streams[0];
     };
     pc.onconnectionstatechange = () => {
+      clearTimeout(grace);
       if (pc.connectionState === "connected") {
+        failures.current = 0;
         setPhase("playing");
         setError(null);
-      } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+      } else if (pc.connectionState === "failed" || pc.connectionState === "closed") {
         fail(`connection ${pc.connectionState}`);
+      } else if (pc.connectionState === "disconnected") {
+        grace = setTimeout(() => fail("connection lost"), DISCONNECT_GRACE_MS);
       }
     };
 
@@ -50,7 +68,7 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
       // Wait (briefly) for ICE gathering so the offer carries candidates.
       await new Promise<void>((resolve) => {
         if (pc.iceGatheringState === "complete") return resolve();
-        const t = setTimeout(resolve, 1500);
+        const t = setTimeout(resolve, ICE_GATHER_MS);
         pc.addEventListener("icegatheringstatechange", () => {
           if (pc.iceGatheringState === "complete") {
             clearTimeout(t);
@@ -74,6 +92,7 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
     return () => {
       cancelled = true;
       clearTimeout(retry);
+      clearTimeout(grace);
       pc.close();
       if (sessionUrl) fetch(sessionUrl, { method: "DELETE" }).catch(() => {});
     };

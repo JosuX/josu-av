@@ -12,9 +12,11 @@ import type { StatusPayload } from "./types";
 export function StreamCard({ status }: { status: StatusPayload }) {
   const { stream, paths, processes } = status;
   const out = paths?.find((p) => p.name === stream.output);
-  const ffmpegUp = processes.some(
-    (p) => p.name === "ffmpeg" && (p.state !== "stopped" && p.state !== "crashed" || p.externalPids.length > 0),
-  );
+  const isUp = (name: string) =>
+    processes.some(
+      (p) => p.name === name && (p.state !== "stopped" && p.state !== "crashed" || p.externalPids.length > 0),
+    );
+  const whip = stream.ingest === "whip";
 
   return (
     <Card>
@@ -24,12 +26,19 @@ export function StreamCard({ status }: { status: StatusPayload }) {
         </CardTitle>
         <CardDescription className="flex flex-wrap items-center gap-x-1 gap-y-1">
           <span>OBS</span>
-          <span className="hidden sm:contents">
-            <ChevronRight className="size-3" />
-            <code className="font-mono">/{stream.input}</code>
-            <ChevronRight className="size-3" />
-            <span>FFmpeg</span>
-          </span>
+          {whip ? (
+            <>
+              <ChevronRight className="size-3" />
+              <span>WHIP</span>
+            </>
+          ) : (
+            <span className="hidden sm:contents">
+              <ChevronRight className="size-3" />
+              <code className="font-mono">/{stream.input}</code>
+              <ChevronRight className="size-3" />
+              <span>FFmpeg</span>
+            </span>
+          )}
           <ChevronRight className="size-3" />
           <code className="font-mono">/{stream.output}</code>
           <ChevronRight className="size-3" />
@@ -63,11 +72,15 @@ export function StreamCard({ status }: { status: StatusPayload }) {
               <VideoOff className="size-8 text-muted-foreground" />
               <p className="text-sm font-medium">/{stream.output} is offline</p>
               <p className="text-xs text-muted-foreground">
-                {!ffmpegUp
-                  ? "Start MediaMTX and FFmpeg. The feed appears as soon as the WebRTC path is live."
-                  : stream.inputReady !== true
-                    ? `FFmpeg is waiting for OBS to publish to /${stream.input}.`
-                    : "Waiting for FFmpeg to publish…"}
+                {whip
+                  ? !isUp("mediamtx")
+                    ? "Start MediaMTX. The feed appears as soon as OBS publishes."
+                    : "Waiting for OBS to publish over WHIP. Start streaming in OBS, and check its stream service in Settings."
+                  : !isUp("ffmpeg")
+                    ? "Start MediaMTX and FFmpeg. The feed appears as soon as the WebRTC path is live."
+                    : stream.inputReady !== true
+                      ? `FFmpeg is waiting for OBS to publish to /${stream.input}.`
+                      : "Waiting for FFmpeg to publish…"}
               </p>
             </div>
           </div>
@@ -83,7 +96,7 @@ export function StreamCard({ status }: { status: StatusPayload }) {
           </Alert>
         )}
         <div className="flex flex-wrap gap-x-4 gap-y-1">
-          <ReadyDot ready={stream.inputReady} label={`/${stream.input}`} />
+          {!whip && <ReadyDot ready={stream.inputReady} label={`/${stream.input}`} />}
           <ReadyDot ready={stream.outputReady} label={`/${stream.output}`} />
           {out?.tracks.length ? (
             <span className="text-xs text-muted-foreground">Tracks: {out.tracks.join(", ")}</span>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Camera, Gauge, Loader2, PlugZap, RotateCw, Save } from "lucide-react";
+import { Camera, Gauge, Loader2, Play, PlugZap, RadioTower, RotateCw, Save, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,7 @@ import { StateBadge } from "./StateBadge";
 import { formatBytes, formatDuration } from "./format";
 import type { ObsPayload } from "./types";
 
-type Busy = "url" | "bitrate" | "restart" | null;
+type Busy = "url" | "bitrate" | "restart" | "whip" | null;
 
 type ActionResult = { ok: true; effectiveBitrate?: number | null; savedBitrate?: number | null } | null;
 
@@ -113,7 +113,8 @@ export function ObsSettings() {
     );
   }
 
-  const { sources, encoder, stream } = obs;
+  const { sources, encoder, stream, service, whipUrl, stoppedByPanel } = obs;
+  const needsWhip = whipUrl !== null && !(service.type === "whip_custom" && service.server === whipUrl);
   const bitrate = bitrateDraft ?? String(encoder.bitrate);
   const bitrateNum = Number(bitrate);
   const bitrateValid = isValidBitrate(bitrateNum);
@@ -210,6 +211,59 @@ export function ObsSettings() {
           </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
+          {stoppedByPanel && !stream.active && (
+            <Alert variant="destructive">
+              <TriangleAlert />
+              <AlertTitle>The stream is OFF</AlertTitle>
+              <AlertDescription>
+                <p>OBS stopped for a restart and did not start again: {stoppedByPanel}</p>
+                <Button
+                  size="sm"
+                  className="mt-2"
+                  disabled={busy !== null}
+                  onClick={() => run("restart", { action: "restart-stream" }, "Stream started")}
+                >
+                  {busy === "restart" ? <Loader2 className="animate-spin" /> : <Play />}
+                  Start stream
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+          {needsWhip && (
+            <Alert>
+              <RadioTower />
+              <AlertTitle>OBS isn&apos;t publishing over WHIP</AlertTitle>
+              <AlertDescription>
+                <p>
+                  OBS streams to <code className="font-mono">{service.server ?? service.type}</code>. The panel plays
+                  the feed straight from OBS over WebRTC, so OBS must publish to{" "}
+                  <code className="font-mono break-all">{whipUrl}</code>.
+                </p>
+                {stream.active ? (
+                  <ConfirmRestart
+                    title="Switch OBS to WHIP and restart the stream?"
+                    trigger={
+                      <Button size="sm" className="mt-2" disabled={busy !== null}>
+                        {busy === "whip" ? <Loader2 className="animate-spin" /> : <RadioTower />}
+                        Switch to WHIP
+                      </Button>
+                    }
+                    onConfirm={() => run("whip", { action: "use-whip" }, "OBS now publishes over WHIP")}
+                  />
+                ) : (
+                  <Button
+                    size="sm"
+                    className="mt-2"
+                    disabled={busy !== null}
+                    onClick={() => run("whip", { action: "use-whip" }, "OBS now publishes over WHIP")}
+                  >
+                    {busy === "whip" ? <Loader2 className="animate-spin" /> : <RadioTower />}
+                    Switch to WHIP
+                  </Button>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
           <dl className="grid grid-cols-3 gap-3 text-sm">
             <div className="flex flex-col gap-0.5">
               <dt className="text-xs text-muted-foreground">Live for</dt>
@@ -303,7 +357,7 @@ function ConfirmRestart({
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
-            OBS stops and restarts its output. The live feed drops for a few seconds while FFmpeg reconnects.
+            OBS stops and restarts its output. The live feed drops for a few seconds while it reconnects.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

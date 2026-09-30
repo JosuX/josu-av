@@ -1,5 +1,6 @@
-// Commands managed by the control panel. Mirrors the setup that was running by hand:
-//   OBS --rtmp--> mediamtx /assembly --ffmpeg (AAC -> Opus)--> /assembly-webrtc (WebRTC/WHEP)
+// Commands managed by the control panel. Two ingest modes:
+//   whip (default): OBS --WHIP (H.264 + Opus)--> mediamtx /assembly --WHEP--> browser
+//   rtmp:           OBS --rtmp--> mediamtx /assembly --ffmpeg (AAC -> Opus)--> /assembly-webrtc --WHEP--> browser
 
 export type ProcName = "mediamtx" | "ffmpeg";
 
@@ -22,13 +23,26 @@ export interface ProcSpec {
 
 const MEDIAMTX_BIN = process.env.AV_MEDIAMTX_BIN ?? "mediamtx";
 const RTSP = process.env.AV_RTSP_BASE ?? "rtsp://127.0.0.1:8554";
+export type Ingest = "whip" | "rtmp";
+/**
+ * How OBS publishes. Over WHIP, OBS already sends Opus, so browsers play the input path
+ * directly and FFmpeg is not needed. Over RTMP, FFmpeg re-encodes AAC to Opus.
+ */
+export const INGEST: Ingest = process.env.AV_INGEST === "rtmp" ? "rtmp" : "whip";
 export const INPUT_PATH = process.env.AV_INPUT_PATH ?? "assembly";
-export const OUTPUT_PATH = process.env.AV_OUTPUT_PATH ?? "assembly-webrtc";
+export const OUTPUT_PATH = INGEST === "whip" ? INPUT_PATH : (process.env.AV_OUTPUT_PATH ?? "assembly-webrtc");
 
 export const MEDIAMTX_API = process.env.AV_MEDIAMTX_API ?? "http://127.0.0.1:9997";
+/** host:port for MediaMTX's apiAddress, from MEDIAMTX_API (MediaMTX needs the port spelled out). */
+export function apiListenAddress(url: string) {
+  const u = new URL(url);
+  return `${u.hostname}:${u.port || (u.protocol === "https:" ? 443 : 80)}`;
+}
 export const MEDIAMTX_HLS = process.env.AV_MEDIAMTX_HLS ?? "http://127.0.0.1:8888";
 /** WebRTC port the browser connects to (on the same host that serves this app). */
 export const WEBRTC_PORT = Number(process.env.AV_WEBRTC_PORT ?? 8889);
+/** Where OBS publishes in WHIP mode (OBS runs on this host). */
+export const WHIP_URL = `http://127.0.0.1:${WEBRTC_PORT}/${INPUT_PATH}/whip`;
 
 /** Declaration order is start order ("Start all"); "Stop all" goes in reverse. */
 export const PROCS: Record<ProcName, ProcSpec> = {
@@ -41,7 +55,8 @@ export const PROCS: Record<ProcName, ProcSpec> = {
     args: [process.env.AV_MEDIAMTX_CONFIG ?? "/etc/mediamtx/mediamtx.yml"],
     // Enable the control API (local only) so the panel can see which paths are live,
     // without editing the root-owned config file.
-    env: { MTX_API: "yes", MTX_APIADDRESS: "127.0.0.1:9997" },
+    // The address comes from AV_MEDIAMTX_API so the panel polls the port MediaMTX listens on.
+    env: { MTX_API: "yes", MTX_APIADDRESS: apiListenAddress(MEDIAMTX_API) },
     stopSignal: "SIGTERM",
     autoRestart: false,
     externalPattern: `^(\\S*/)?${MEDIAMTX_BIN.split("/").pop()}( |$)`,
@@ -73,7 +88,8 @@ export const PROCS: Record<ProcName, ProcSpec> = {
   },
 };
 
-export const PROC_NAMES = Object.keys(PROCS) as ProcName[];
+/** Processes this panel manages; FFmpeg only takes part in RTMP ingest. */
+export const PROC_NAMES = (Object.keys(PROCS) as ProcName[]).filter((n) => n !== "ffmpeg" || INGEST === "rtmp");
 
 /**
  * Spawn children through `setpriv --pdeathsig` so the kernel stops them if this server
@@ -82,7 +98,7 @@ export const PROC_NAMES = Object.keys(PROCS) as ProcName[];
 export const PDEATHSIG = process.env.AV_PDEATHSIG !== "0";
 
 export function isProcName(s: string): s is ProcName {
-  return Object.hasOwn(PROCS, s);
+  return PROC_NAMES.includes(s as ProcName);
 }
 
 // OBS runs on this host and is controlled over obs-websocket (Tools → WebSocket Server Settings).
