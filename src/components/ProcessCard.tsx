@@ -104,6 +104,14 @@ export function ProcessCard({ proc, onChange }: { proc: ProcStatus; onChange: ()
           </Tooltip>
         </div>
 
+        {proc.state === "crashed" && proc.note && (
+          <Alert variant="destructive">
+            <TriangleAlert />
+            <AlertTitle>Not restarting automatically</AlertTitle>
+            <AlertDescription>{proc.note[0].toUpperCase() + proc.note.slice(1)}. Check the logs, then start it again.</AlertDescription>
+          </Alert>
+        )}
+
         {external && (
           <Alert>
             <TriangleAlert />

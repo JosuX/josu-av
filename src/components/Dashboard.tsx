@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ProcessCard } from "./ProcessCard";
 import { StreamCard } from "./StreamCard";
 import { SystemCharts } from "./SystemCharts";
+import { HealthAlerts } from "./HealthAlerts";
 import { fetchStatus, procAction, useStatus } from "./hooks";
 import type { ProcName, StatusPayload } from "./types";
 
@@ -87,6 +88,8 @@ export function Dashboard() {
           <AlertDescription>{error}. Retrying…</AlertDescription>
         </Alert>
       )}
+
+      {status && <HealthAlerts warnings={status.warnings} />}
 
       <SystemCharts />
 

@@ -92,3 +92,41 @@ describe("ManagedProcess", () => {
     expect(p.exitSignal).toBe("SIGTERM");
   });
 });
+
+describe("ManagedProcess watchdog", () => {
+  const procs: ManagedProcess[] = [];
+  afterEach(async () => {
+    await Promise.all(procs.splice(0).map((p) => p.stop()));
+  });
+
+  it("gives up after too many crashes in a row", async () => {
+    const p = new ManagedProcess(sh("exit 1", { autoRestart: true, watchdog: { maxDelayMs: 40, giveUpAfter: 2 } }), 10);
+    procs.push(p);
+    p.start();
+    await waitFor(p, "crashed");
+    expect(p.restarts).toBe(2);
+    expect(p.note).toMatch(/crashed 3 times in a row/);
+  });
+
+  it("backs off between restarts", async () => {
+    const p = new ManagedProcess(sh("exit 1", { autoRestart: true, watchdog: { maxDelayMs: 1000, giveUpAfter: 5 } }), 10);
+    procs.push(p);
+    const delays: string[] = [];
+    p.on("line", (l: { text: string }) => {
+      const m = /restarting in (\S+)s/.exec(l.text);
+      if (m) delays.push(m[1]);
+    });
+    p.start();
+    await waitFor(p, "crashed");
+    expect(delays).toEqual(["0.01", "0.02", "0.04", "0.08", "0.16"]);
+  });
+
+  it("does not restart a binary that cannot be started", async () => {
+    const p = new ManagedProcess({ ...sh("", { autoRestart: true }), bin: "/nonexistent/av-test-bin" }, 10);
+    procs.push(p);
+    p.start();
+    await waitFor(p, "crashed");
+    expect(p.restarts).toBe(0);
+    expect(p.note).toMatch(/could not be started/);
+  });
+});

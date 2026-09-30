@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { BITRATE_MAX, BITRATE_MIN, isValidBitrate } from "@/lib/shared";
 import { StateBadge } from "./StateBadge";
+import { AutomationCard } from "./AutomationCard";
 import { formatBytes, formatDuration } from "./format";
 import type { ObsPayload } from "./types";
 
@@ -374,9 +375,12 @@ function Layout({ children }: { children: React.ReactNode }) {
     <div className="flex flex-col gap-4 sm:gap-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Settings</h1>
-        <p className="hidden text-sm text-muted-foreground sm:block">OBS camera source and stream encoder.</p>
+        <p className="hidden text-sm text-muted-foreground sm:block">OBS camera source, stream encoder and automation.</p>
       </div>
-      <div className="grid items-start gap-4 lg:grid-cols-2">{children}</div>
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        {children}
+        <AutomationCard />
+      </div>
     </div>
   );
 }

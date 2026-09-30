@@ -1,7 +1,6 @@
 "use client";
 
-import { ChevronRight, ExternalLink, MonitorPlay, TriangleAlert, VideoOff } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ChevronRight, ExternalLink, MonitorPlay, VideoOff } from "lucide-react";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -84,16 +83,6 @@ export function StreamCard({ status }: { status: StatusPayload }) {
               </p>
             </div>
           </div>
-        )}
-        {stream.outputReady && out?.tracks.includes("H265") && (
-          <Alert>
-            <TriangleAlert />
-            <AlertTitle>The video is H.265 (HEVC)</AlertTitle>
-            <AlertDescription>
-              Most browsers can&apos;t play H.265 over WebRTC, so the feed may not appear. Set OBS&apos;s video
-              encoder to an H.264 option (x264, NVENC H.264 or QuickSync H.264) and restart streaming.
-            </AlertDescription>
-          </Alert>
         )}
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {!whip && <ReadyDot ready={stream.inputReady} label={`/${stream.input}`} />}

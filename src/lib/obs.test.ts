@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ObsBusyError,
   ObsError,
+  encoderCodec,
   parseEffectiveBitrate,
   parseEncoderStarts,
   restartStream,
@@ -83,7 +84,7 @@ function fakeObs({ active = true, startFailures = 0, serviceFails = false } = {}
   return { obs, calls, isActive: () => active };
 }
 
-const live = { active: true, reconnecting: false, durationMs: 0, bytes: 0 };
+const live = { active: true, reconnecting: false, durationMs: 0, bytes: 0, congestion: 0, skippedFrames: 0, totalFrames: 0 };
 const off = { ...live, active: false };
 
 describe("restartStream", () => {
@@ -143,5 +144,21 @@ describe("switchToWhip", () => {
     await switchToWhip(obs);
     expect(isActive()).toBe(false);
     expect(calls).not.toContain("StartStream");
+  });
+});
+
+describe("encoderCodec", () => {
+  it.each([
+    ["obs_x264", "H.264"],
+    ["ffmpeg_vaapi_tex", "H.264"],
+    ["x264", "H.264"],
+    ["nvenc", "H.264"],
+    ["jim_hevc_nvenc", "H.265"],
+    ["ffmpeg_hevc_vaapi_tex", "H.265"],
+    ["nvenc_hevc", "H.265"],
+    ["obs_qsv11_av1", "AV1"],
+    ["jim_av1_nvenc", "AV1"],
+  ])("%s → %s", (id, codec) => {
+    expect(encoderCodec(id)).toBe(codec);
   });
 });

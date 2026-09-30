@@ -173,6 +173,23 @@ export async function setSourceUrl(obs: ObsSession, inputName: string, url: stri
   await obs.call("SetInputSettings", { inputName, inputSettings: { [key]: url, is_local_file: false }, overlay: true });
 }
 
+/** e.g. "OBS_MEDIA_STATE_PLAYING", "OBS_MEDIA_STATE_ERROR". */
+export async function getMediaState(obs: ObsSession, inputName: string): Promise<string> {
+  const { mediaState } = await obs.call<{ mediaState: string }>("GetMediaInputStatus", { inputName });
+  return mediaState;
+}
+
+/** Whether the source is showing in the program output. */
+export async function isSourceActive(obs: ObsSession, sourceName: string): Promise<boolean> {
+  const { videoActive } = await obs.call<{ videoActive: boolean }>("GetSourceActive", { sourceName });
+  return videoActive;
+}
+
+/** Make OBS reopen a media source, reconnecting to its URL. */
+export async function reloadMediaSource(obs: ObsSession, inputName: string) {
+  await obs.call("TriggerMediaInputAction", { inputName, mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART" });
+}
+
 // ---------------------------------------------------------------------------
 // Stream encoder. OBS has no websocket request for encoder settings, but in Advanced
 // output mode it re-reads the profile's streamEncoder.json every time a stream starts.
@@ -306,6 +323,21 @@ export async function getEncoder(obs: ObsSession): Promise<EncoderInfo> {
   };
 }
 
+/** The stream's video encoder id, e.g. "obs_x264" (Advanced) or "nvenc_hevc" (Simple). */
+export async function getEncoderId(obs: ObsSession): Promise<string> {
+  const advanced = (await profileParam(obs, "Output", "Mode")) === "Advanced";
+  return advanced ? profileParam(obs, "AdvOut", "Encoder") : profileParam(obs, "SimpleOutput", "StreamEncoder");
+}
+
+/** The video codec an OBS encoder id produces. Ids that name no other codec are H.264. */
+export function encoderCodec(id: string): "H.264" | "H.265" | "AV1" | "VP9" {
+  const s = id.toLowerCase();
+  if (s.includes("av1")) return "AV1";
+  if (/hevc|h265|x265/.test(s)) return "H.265";
+  if (s.includes("vp9")) return "VP9";
+  return "H.264";
+}
+
 export async function setBitrate(obs: ObsSession, kbps: number) {
   const info = await getEncoder(obs);
   if (info.unsupported) throw new ObsError(info.unsupported);
@@ -333,6 +365,11 @@ export interface StreamStatus {
   reconnecting: boolean;
   durationMs: number;
   bytes: number;
+  /** 0–1; how backed up the output is. */
+  congestion: number;
+  /** Frames the output dropped (network), and frames it sent, since the stream started. */
+  skippedFrames: number;
+  totalFrames: number;
 }
 
 export async function getStreamStatus(obs: ObsSession): Promise<StreamStatus> {
@@ -341,8 +378,35 @@ export async function getStreamStatus(obs: ObsSession): Promise<StreamStatus> {
     outputReconnecting: boolean;
     outputDuration: number;
     outputBytes: number;
+    outputCongestion?: number;
+    outputSkippedFrames?: number;
+    outputTotalFrames?: number;
   }>("GetStreamStatus");
-  return { active: s.outputActive, reconnecting: s.outputReconnecting, durationMs: s.outputDuration, bytes: s.outputBytes };
+  return {
+    active: s.outputActive,
+    reconnecting: s.outputReconnecting,
+    durationMs: s.outputDuration,
+    bytes: s.outputBytes,
+    congestion: s.outputCongestion ?? 0,
+    skippedFrames: s.outputSkippedFrames ?? 0,
+    totalFrames: s.outputTotalFrames ?? 0,
+  };
+}
+
+/** Frames OBS skipped while rendering and while encoding, since OBS started. */
+export async function getFrameStats(obs: ObsSession) {
+  const s = await obs.call<{
+    renderSkippedFrames: number;
+    renderTotalFrames: number;
+    outputSkippedFrames: number;
+    outputTotalFrames: number;
+  }>("GetStats");
+  return {
+    renderSkipped: s.renderSkippedFrames,
+    renderTotal: s.renderTotalFrames,
+    encodeSkipped: s.outputSkippedFrames,
+    encodeTotal: s.outputTotalFrames,
+  };
 }
 
 async function waitForStream(obs: ObsSession, active: boolean, timeoutMs = 15000) {
@@ -420,6 +484,22 @@ async function withStreamStopped(obs: ObsSession, change: () => Promise<void>, {
 /** Stop the stream if it is live, then start it (which picks up new encoder settings). */
 export async function restartStream(obs: ObsSession) {
   await withStreamStopped(obs, async () => {}, { startIfIdle: true });
+}
+
+/** Start the stream if it is off (retrying once); refused while a restart is in progress. */
+export async function ensureStreamLive(obs: ObsSession) {
+  if (state.restarting) throw new ObsBusyError("A stream restart is already in progress");
+  state.restarting = true;
+  try {
+    await startStream(obs);
+  } finally {
+    state.restarting = false;
+  }
+}
+
+/** A stop/start cycle is in progress; automations should leave the stream alone. */
+export function isRestarting() {
+  return state.restarting;
 }
 
 /**

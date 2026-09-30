@@ -89,14 +89,17 @@ variables:
 | `AV_OBS_WS_PASSWORD` | *(read from OBS's config)* | obs-websocket password |
 | `AV_OBS_CONFIG_DIR` | `$XDG_CONFIG_HOME/obs-studio` | OBS config directory (profiles, logs, websocket config) |
 | `AV_PDEATHSIG` | `1` | Set to `0` to spawn children directly instead of through `setpriv` |
+| `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` | Where the automation switches are saved (`automation.json`) |
 
 The commands themselves are defined in `src/lib/config.ts`.
 
 ## How it behaves
 
 - **Process supervision.** The panel spawns MediaMTX (and FFmpeg in RTMP mode) as child
-  processes and keeps the last 3,000 log lines of each. FFmpeg restarts itself every 3 s after it
-  exits, because it exits whenever OBS stops publishing.
+  processes and keeps the last 3,000 log lines of each. MediaMTX restarts after a crash, waiting
+  3 s and doubling up to 30 s; after 6 crashes in a row (each within 30 s of starting) it gives up
+  and the dashboard says so. FFmpeg restarts every 3 s after it exits, because it exits whenever
+  OBS stops publishing. Neither is restarted if its binary can't be started at all.
 - **Player.** The dashboard's WebRTC player sends its offer after at most 250 ms of ICE
   gathering, asks the browser for no extra playout buffering, rides out brief network drops
   for 2 s, and otherwise reconnects with a backoff from 0.5 s up to 5 s.
@@ -115,6 +118,28 @@ The commands themselves are defined in `src/lib/config.ts`.
   and starts it again. If the start fails, the panel retries once after 2 s; if that fails too,
   the Settings page shows **The stream is OFF** with a button to start it. Switching to WHIP
   restarts the stream even when OBS rejects the new service settings.
+
+## Automation
+
+A background supervisor runs every 3 s from server start (`src/instrumentation.ts`), whether or
+not a browser is open. Its switches are on the Settings page and are saved across restarts;
+what it does is listed there under **Recent activity** and in the server log (`[automation]`).
+
+- **Keep stream live** (off by default). Starts OBS's stream whenever it is off, once MediaMTX is
+  up. Failed starts are retried after 5 s, doubling up to a minute, and it gives up after 5.
+  Turn it off before ending the stream, or it will start it again.
+- **Reconnect cameras** (on). A network media source that is on screen and in an error, ended or
+  stopped state for 5 s, or stuck opening/buffering for 20 s, is reloaded (at most every 30 s).
+  A source that freezes while OBS still reports it as playing can't be detected.
+- **Keep OBS on WHIP** (on, WHIP ingest only). If OBS's stream service is not the panel's WHIP
+  endpoint while the stream is idle, it is switched back.
+
+Always on, and shown as alerts on the dashboard while they last:
+
+- **Codec check.** OBS set to (or MediaMTX receiving) H.265, AV1 or VP9, which browsers can't
+  play over WebRTC, with the OBS setting to change.
+- **Quality warnings.** 2% or more of frames dropped over the last 15 s for network, encoding
+  or rendering reasons, or output congestion of 50% or more, each with the likely fix.
 
 ## Security
 

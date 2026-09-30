@@ -17,6 +17,11 @@ export interface ProcSpec {
   stopSignal: NodeJS.Signals;
   /** Restart automatically when the process exits on its own. */
   autoRestart: boolean;
+  /**
+   * With autoRestart: double the restart delay after each crash in a row, up to maxDelayMs,
+   * and give up after giveUpAfter of them. Unset: fixed delay, never give up.
+   */
+  watchdog?: { maxDelayMs: number; giveUpAfter: number };
   /** Pattern used to find instances started outside this app (pgrep -f). */
   externalPattern: string;
 }
@@ -58,7 +63,10 @@ export const PROCS: Record<ProcName, ProcSpec> = {
     // The address comes from AV_MEDIAMTX_API so the panel polls the port MediaMTX listens on.
     env: { MTX_API: "yes", MTX_APIADDRESS: apiListenAddress(MEDIAMTX_API) },
     stopSignal: "SIGTERM",
-    autoRestart: false,
+    // A crashed MediaMTX takes the feed down; bring it back, but stop if it keeps crashing
+    // (e.g. a bad config or a port in use), where retrying cannot help.
+    autoRestart: true,
+    watchdog: { maxDelayMs: 30_000, giveUpAfter: 5 },
     externalPattern: `^(\\S*/)?${MEDIAMTX_BIN.split("/").pop()}( |$)`,
   },
   ffmpeg: {

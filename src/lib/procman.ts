@@ -27,11 +27,15 @@ export interface ProcStatus {
   exitCode: number | null;
   exitSignal: string | null;
   restarts: number;
+  /** Why the process is not being restarted (watchdog gave up, binary missing), if it isn't. */
+  note: string | null;
   command: string;
   externalPids: number[];
 }
 
 const RESTART_DELAY_MS = 3000;
+/** A run at least this long ends a crash streak: the next exit counts as the first again. */
+const STABLE_RUN_MS = 30_000;
 const KILL_TIMEOUT_MS = 5000;
 /** How long a pgrep result is reused; status is polled by every open dashboard. */
 const EXTERNAL_CACHE_MS = 1000;
@@ -72,10 +76,14 @@ export class ManagedProcess extends EventEmitter {
   exitCode: number | null = null;
   exitSignal: string | null = null;
   restarts = 0;
+  note: string | null = null;
   lines: LogLine[] = [];
   private seq = 0;
   private wantRunning = false;
   private restartTimer: NodeJS.Timeout | null = null;
+  /** Exits in a row that each followed a short run. */
+  private crashStreak = 0;
+  private spawnFailed = false;
   private partial: Record<"stdout" | "stderr", string> = { stdout: "", stderr: "" };
 
   constructor(
@@ -115,6 +123,8 @@ export class ManagedProcess extends EventEmitter {
 
   start() {
     this.wantRunning = true;
+    this.note = null;
+    this.crashStreak = 0;
     if (this.restartTimer) {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
@@ -129,6 +139,7 @@ export class ManagedProcess extends EventEmitter {
     this.setState("starting");
     this.exitCode = null;
     this.exitSignal = null;
+    this.spawnFailed = false;
 
     const child = spawn(...spawnArgv(this.spec), {
       env: { ...process.env, ...env },
@@ -144,6 +155,7 @@ export class ManagedProcess extends EventEmitter {
     child.stdout?.on("data", (c: Buffer) => this.onData("stdout", c));
     child.stderr?.on("data", (c: Buffer) => this.onData("stderr", c));
     child.once("error", (err) => {
+      this.spawnFailed = true;
       this.log("system", `failed to start: ${err.message}`);
     });
     child.once("close", (code, signal) => {
@@ -151,26 +163,50 @@ export class ManagedProcess extends EventEmitter {
         if (this.partial[s].trim()) this.log(s, this.partial[s]);
         this.partial[s] = "";
       }
+      const ranMs = this.startedAt ? Date.now() - this.startedAt : 0;
+      // setpriv exits 126/127 when it cannot exec the target (missing or not executable).
+      if ((code === 126 || code === 127) && ranMs < 1000) this.spawnFailed = true;
+      this.crashStreak = ranMs >= STABLE_RUN_MS ? 1 : this.crashStreak + 1;
       this.child = null;
       this.exitCode = code;
       this.exitSignal = signal;
       this.startedAt = null;
       this.log("system", `exited (${signal ? `signal ${signal}` : `code ${code}`})`);
 
-      if (this.wantRunning && this.spec.autoRestart) {
+      const blocked = this.wantRunning && this.spec.autoRestart ? this.restartBlocker() : null;
+      if (this.wantRunning && this.spec.autoRestart && !blocked) {
+        const delay = this.restartDelay();
         this.restarts++;
         this.setState("restarting");
-        this.log("system", `restarting in ${this.restartDelayMs / 1000}s…`);
+        this.log("system", `restarting in ${delay / 1000}s…`);
         this.restartTimer = setTimeout(() => {
           this.restartTimer = null;
           if (this.wantRunning) this.spawnChild();
-        }, this.restartDelayMs);
+        }, delay);
       } else {
-        const clean = !this.wantRunning || code === 0;
+        if (blocked) {
+          this.note = blocked;
+          this.log("system", `not restarting: ${blocked}`);
+        }
+        const clean = !this.wantRunning || (code === 0 && !blocked);
         this.wantRunning = false;
         this.setState(clean ? "stopped" : "crashed");
       }
     });
+  }
+
+  /** Why an automatic restart would not help, or null to go ahead. */
+  private restartBlocker(): string | null {
+    if (this.spawnFailed) return `${this.spec.bin} could not be started`;
+    const wd = this.spec.watchdog;
+    if (wd && this.crashStreak > wd.giveUpAfter) return `crashed ${this.crashStreak} times in a row`;
+    return null;
+  }
+
+  private restartDelay() {
+    const wd = this.spec.watchdog;
+    if (!wd) return this.restartDelayMs;
+    return Math.min(this.restartDelayMs * 2 ** (this.crashStreak - 1), wd.maxDelayMs);
   }
 
   async stop(): Promise<void> {
@@ -276,6 +312,7 @@ class ProcessManager {
           exitCode: p.exitCode,
           exitSignal: p.exitSignal,
           restarts: p.restarts,
+          note: p.note,
           command: [p.spec.bin, ...p.spec.args].join(" "),
           externalPids: await this.findExternal(name),
         };

@@ -6,4 +6,4 @@ export type { LogLine, ProcState, ProcStatus } from "@/lib/procman";
 export type { PathInfo } from "@/lib/mediamtx";
 export type { StatSample } from "@/lib/sysstats";
 export type { ObsPayload } from "@/lib/obs";
-export type { StatusPayload } from "@/lib/shared";
+export type { AutomationEvent, AutomationPayload, AutomationSettings, HealthWarning, StatusPayload } from "@/lib/shared";
