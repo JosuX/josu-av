@@ -25,6 +25,13 @@ export function isValidBitrate(n: number) {
   return Number.isInteger(n) && n >= BITRATE_MIN && n <= BITRATE_MAX;
 }
 
+/**
+ * Adaptive bitrate. "recommend" suggests changes from viewers' playback stats; "auto" applies
+ * them live through the OBS script (never by restarting the stream).
+ */
+export type BitrateMode = "off" | "recommend" | "auto";
+export const BITRATE_MODES = ["off", "recommend", "auto"] as const satisfies readonly BitrateMode[];
+
 /** Automations the operator can switch on and off (Settings page). */
 export interface AutomationSettings {
   /** Start OBS's stream whenever it is off. */
@@ -35,9 +42,101 @@ export interface AutomationSettings {
   keepWhip: boolean;
   /** Open OBS when MediaMTX is up and OBS isn't running. */
   launchObs: boolean;
+  adaptiveBitrate: BitrateMode;
+  /** Adaptive bitrate never goes below this, kbps. */
+  minBitrate: number;
 }
 
-export const AUTOMATION_KEYS = ["keepStreamLive", "reconnectCameras", "keepWhip", "launchObs"] as const satisfies readonly (keyof AutomationSettings)[];
+export const AUTOMATION_SWITCHES = ["keepStreamLive", "reconnectCameras", "keepWhip", "launchObs"] as const satisfies readonly (keyof AutomationSettings)[];
+
+export const DEFAULT_AUTOMATION: AutomationSettings = {
+  keepStreamLive: false,
+  reconnectCameras: true,
+  keepWhip: true,
+  launchObs: false,
+  adaptiveBitrate: "recommend",
+  minBitrate: 1500,
+};
+
+/** Validate a partial settings update, e.g. from POST /api/automation. */
+export function parseAutomationPatch(body: unknown): { patch: Partial<AutomationSettings> } | { error: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "expected a JSON object" };
+  const patch: Partial<AutomationSettings> = {};
+  for (const [k, v] of Object.entries(body)) {
+    if ((AUTOMATION_SWITCHES as readonly string[]).includes(k)) {
+      if (typeof v !== "boolean") return { error: `${k} must be true or false` };
+      patch[k as (typeof AUTOMATION_SWITCHES)[number]] = v;
+    } else if (k === "adaptiveBitrate") {
+      if (!BITRATE_MODES.includes(v as BitrateMode)) return { error: `adaptiveBitrate must be ${BITRATE_MODES.join(", ")}` };
+      patch.adaptiveBitrate = v as BitrateMode;
+    } else if (k === "minBitrate") {
+      if (typeof v !== "number" || !isValidBitrate(v)) return { error: `minBitrate must be ${BITRATE_MIN}–${BITRATE_MAX} kbps` };
+      patch.minBitrate = v;
+    } else {
+      return { error: `unknown setting ${k}` };
+    }
+  }
+  return { patch };
+}
+
+/** How a viewer's playback is going. "device": dropping frames without losing packets. */
+export type ViewerHealth = "good" | "network" | "device" | "unknown";
+
+export interface ViewerInfo {
+  id: string;
+  label: string;
+  health: ViewerHealth;
+  lossPct: number;
+  dropPct: number;
+  /** Seconds spent frozen within the window. */
+  freezeSec: number;
+  kbps: number;
+  fps: number | null;
+  resolution: string | null;
+  /** The page is in the background, so its stats say nothing about the network. */
+  hidden: boolean;
+}
+
+export interface AbrStatus {
+  mode: BitrateMode;
+  streamActive: boolean;
+  /** Bitrate the encoder runs at now, kbps (from the OBS script when present, else the profile). */
+  current: number | null;
+  /** The profile's saved bitrate: adaptive bitrate never goes above it. */
+  ceiling: number | null;
+  min: number;
+  /** Measured from OBS's output byte counter. */
+  outputKbps: number | null;
+  script: {
+    state: "ok" | "missing";
+    /** Absolute path of the Lua script to add in OBS (Tools → Scripts). */
+    path: string;
+    encoder: string | null;
+    /** Whether that encoder is known to accept bitrate changes while streaming. */
+    liveCapable: boolean;
+  };
+  viewers: ViewerInfo[];
+  /** MediaMTX readers the panel can't measure (e.g. its own player page). */
+  unmeasured: number;
+  recommendation: { direction: "down" | "up"; target: number; reason: string } | null;
+  lastChange: { ts: number; from: number; to: number; reason: string; auto: boolean } | null;
+}
+
+/** Stats a player sends to POST /api/viewers; counters are cumulative for the connection. */
+export interface ViewerReport {
+  id: string;
+  label: string;
+  hidden: boolean;
+  packetsLost: number;
+  packetsReceived: number;
+  framesDecoded: number;
+  framesDropped: number;
+  freezeSec: number;
+  bytesReceived: number;
+  fps: number | null;
+  width: number | null;
+  height: number | null;
+}
 
 /** A problem the operator should know about, shown on the dashboard while it lasts. */
 export interface HealthWarning {
@@ -58,6 +157,7 @@ export interface AutomationEvent {
 /** Payload of GET /api/automation. */
 export interface AutomationPayload {
   settings: AutomationSettings;
+  abr: AbrStatus | null;
   ingest: "whip" | "rtmp";
   obsConnected: boolean;
   warnings: HealthWarning[];
@@ -69,6 +169,8 @@ export interface StatusPayload {
   processes: ProcStatus[];
   paths: PathInfo[] | null;
   warnings: HealthWarning[];
+  /** Null until OBS has been reached. */
+  abr: AbrStatus | null;
   stream: {
     /** "whip": OBS publishes Opus straight to `input` (== `output`); "rtmp": FFmpeg bridges them. */
     ingest: "whip" | "rtmp";

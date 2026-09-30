@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { ViewerReport } from "@/lib/shared";
+import { deviceLabel } from "./format";
 
 type Phase = "connecting" | "playing" | "error";
 
@@ -13,6 +15,33 @@ const DISCONNECT_GRACE_MS = 2000;
 /** Reconnect backoff: 500 ms, doubling up to 5 s, reset once playing. */
 const RETRY_MIN_MS = 500;
 const RETRY_MAX_MS = 5000;
+/** How often playback stats go to the server for adaptive bitrate. */
+const STATS_EVERY_MS = 5000;
+
+/** The inbound video stats of a connection, in the shape the server expects. */
+async function readStats(pc: RTCPeerConnection, id: string, label: string): Promise<ViewerReport | null> {
+  let v: Record<string, number | string | undefined> | undefined;
+  (await pc.getStats()).forEach((s) => {
+    if (s.type === "inbound-rtp" && s.kind === "video") v = s;
+  });
+  if (!v) return null;
+  const n = (k: string) => (typeof v![k] === "number" ? Math.max(0, v![k] as number) : 0);
+  const opt = (k: string) => (typeof v![k] === "number" ? (v![k] as number) : null);
+  return {
+    id,
+    label,
+    hidden: document.visibilityState === "hidden",
+    packetsLost: n("packetsLost"),
+    packetsReceived: n("packetsReceived"),
+    framesDecoded: n("framesDecoded"),
+    framesDropped: n("framesDropped"),
+    freezeSec: n("totalFreezesDuration"),
+    bytesReceived: n("bytesReceived"),
+    fps: opt("framesPerSecond"),
+    width: opt("frameWidth"),
+    height: opt("frameHeight"),
+  };
+}
 
 /** Minimal WHEP player for a MediaMTX WebRTC path. */
 export function VideoFeed({ path, port }: { path: string; port: number }) {
@@ -30,6 +59,23 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let grace: ReturnType<typeof setTimeout> | undefined;
+    // One id per connection: its counters start from zero. (crypto.randomUUID needs HTTPS.)
+    const viewerId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const label = deviceLabel(navigator.userAgent);
+    const statsTimer = setInterval(() => {
+      if (pc.connectionState !== "connected") return;
+      readStats(pc, viewerId, label)
+        .then((r) =>
+          r
+            ? fetch("/api/viewers", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(r),
+              })
+            : null,
+        )
+        .catch(() => {});
+    }, STATS_EVERY_MS);
 
     const fail = (msg: string) => {
       if (cancelled || retry) return;
@@ -91,6 +137,7 @@ export function VideoFeed({ path, port }: { path: string; port: number }) {
 
     return () => {
       cancelled = true;
+      clearInterval(statsTimer);
       clearTimeout(retry);
       clearTimeout(grace);
       pc.close();

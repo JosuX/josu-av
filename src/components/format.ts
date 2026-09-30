@@ -31,3 +31,22 @@ export function formatDuration(ms: number): string {
 export function formatClock(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour12: false });
 }
+
+/** e.g. "iPad · Safari", to tell viewers apart on the dashboard. */
+export function deviceLabel(ua: string) {
+  const device =
+    [/iPad/, /iPhone/, /Android/, /Mac OS X/, /Windows/, /CrOS/, /Linux/]
+      .find((re) => re.test(ua))
+      ?.source.replace("Mac OS X", "Mac")
+      .replace("CrOS", "Chromebook") ?? "Unknown device";
+  const browser = /Edg\//.test(ua)
+    ? "Edge"
+    : /Firefox\//.test(ua)
+      ? "Firefox"
+      : /Chrome\//.test(ua)
+        ? "Chrome"
+        : /Safari\//.test(ua)
+          ? "Safari"
+          : "browser";
+  return `${device} · ${browser}`;
+}

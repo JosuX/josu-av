@@ -92,7 +92,7 @@ variables:
 | `AV_OBS_BIN` | `obs` | OBS binary, for **Launch OBS** |
 | `AV_OBS_ARGS` | *(none)* | Extra OBS arguments when the panel launches it, e.g. `--minimize-to-tray` |
 | `AV_OBS_PROCESS` | *(binary name)* | Process name used to tell whether OBS is running (`pgrep -x`) |
-| `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` | Where the automation switches are saved (`automation.json`) |
+| `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` | Where the automation switches are saved (`automation.json`), and the files shared with the OBS live-bitrate script |
 
 The commands themselves are defined in `src/lib/config.ts`.
 
@@ -151,6 +151,33 @@ Always on, and shown as alerts on the dashboard while they last:
   play over WebRTC, with the OBS setting to change.
 - **Quality warnings.** 2% or more of frames dropped over the last 15 s for network, encoding
   or rendering reasons, or output congestion of 50% or more, each with the likely fix.
+
+## Adaptive bitrate
+
+MediaMTX forwards one stream to every viewer without re-encoding, so the panel picks one bitrate
+that works for most of them. It measures quality from the dashboard's own players: each sends
+its browser's WebRTC stats (packets lost, frames dropped, time frozen) every 5 s. Viewers who
+watch elsewhere, such as MediaMTX's player page, are counted but can't be measured.
+
+Over a 25 s window each viewer is **smooth**, **losing packets** (2% or more lost, or frozen
+while losing some: the network can't keep up), or **device lagging** (dropping frames without
+loss: the device can't decode fast enough, which a lower bitrate won't fix; the dashboard
+suggests lowering OBS's output resolution instead).
+
+- When half or more of the measured viewers are losing packets, the bitrate drops 20%, then
+  waits 30 s before judging again. It never goes below the floor (default 1500 kbps).
+- After 10 minutes with no one losing packets it rises 10% at a time, never above the bitrate
+  saved under Settings → Stream output.
+
+Set the mode under Settings → Automation: **Off** (stats only), **Recommend** (the default; the
+dashboard suggests a bitrate for you to apply), or **Automatic**.
+
+Changes are applied live, without restarting the stream, by an OBS script: add
+`obs/av-live-bitrate.lua` under **Tools → Scripts → +** in OBS (the Settings page shows its full
+path). It swaps files with the panel in `AV_STATE_DIR`, so if you change that, set the same folder
+in the script's settings. Only encoders that accept a new bitrate while running can do this:
+x264 and NVENC. With another encoder, or without the script, Automatic only recommends and a
+change needs **Apply & restart stream**. A new stream always starts at the saved bitrate.
 
 ## Security
 

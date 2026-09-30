@@ -2,28 +2,22 @@ import "server-only";
 import { readFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { AUTOMATION_KEYS, type AutomationSettings } from "./shared";
+import { STATE_DIR } from "./config";
+import { DEFAULT_AUTOMATION, parseAutomationPatch, type AutomationSettings } from "./shared";
 
 // Operator choices persist across restarts, in AV_STATE_DIR (default ~/.local/state/av-control).
 
-const STATE_DIR =
-  process.env.AV_STATE_DIR ?? `${process.env.XDG_STATE_HOME ?? `${process.env.HOME}/.local/state`}/av-control`;
 const FILE = path.join(STATE_DIR, "automation.json");
 
-export const DEFAULT_AUTOMATION: AutomationSettings = {
-  keepStreamLive: false,
-  reconnectCameras: true,
-  keepWhip: true,
-  launchObs: false,
-};
+export { DEFAULT_AUTOMATION };
 
-/** Defaults overlaid with every boolean setting found in `raw`. */
+/** Defaults overlaid with every valid setting found in `raw`; invalid ones are ignored. */
 export function parseAutomationSettings(raw: unknown): AutomationSettings {
   const out = { ...DEFAULT_AUTOMATION };
   if (raw && typeof raw === "object") {
-    for (const k of AUTOMATION_KEYS) {
-      const v = (raw as Record<string, unknown>)[k];
-      if (typeof v === "boolean") out[k] = v;
+    for (const [k, v] of Object.entries(raw)) {
+      const one = parseAutomationPatch({ [k]: v });
+      if ("patch" in one) Object.assign(out, one.patch);
     }
   }
   return out;

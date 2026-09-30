@@ -9,6 +9,7 @@ import {
   getFrameStats,
   getMediaState,
   getStreamService,
+  getSavedBitrate,
   getStreamStatus,
   isRestarting,
   isSourceActive,
@@ -23,7 +24,23 @@ import {
 import { procman } from "./procman";
 import { displayEnv, isObsRunning, launchObs } from "./obs-launch";
 import { loadAutomationSettings, saveAutomationSettings } from "./automation-settings";
-import type { AutomationEvent, AutomationPayload, AutomationSettings, HealthWarning } from "./shared";
+import { decide } from "./abr";
+import {
+  SCRIPT_PATH,
+  clearBitrateRequest,
+  isLiveCapable,
+  readScriptStatus,
+  requestBitrate,
+} from "./live-bitrate";
+import { viewerInfo, viewers } from "./viewers";
+import {
+  isValidBitrate,
+  type AbrStatus,
+  type AutomationEvent,
+  type AutomationPayload,
+  type AutomationSettings,
+  type HealthWarning,
+} from "./shared";
 
 // Background checks that keep the feed up and flag problems, whether or not a browser has the
 // panel open. Started from instrumentation.ts when the server boots.
@@ -52,6 +69,9 @@ const CONGESTION_WARN = 0.5;
 const OBS_LAUNCH_WAIT_MS = 30_000;
 const OBS_LAUNCH_GIVE_UP = 3;
 const OBS_STABLE_MS = 60_000;
+
+/** Window for measuring OBS's actual output bitrate. */
+const OUTPUT_RATE_WINDOW_MS = 10_000;
 
 /** Switching OBS back to WHIP is retried at most this often. */
 const WHIP_RETRY_MS = 30_000;
@@ -163,6 +183,14 @@ class Supervisor {
   private frames: FrameSample[] = [];
   private lastWhipAttempt = 0;
   private obsLaunch = { attempts: 0, nextAt: 0, connectedSince: 0 };
+  private abr = {
+    lastChangeAt: 0,
+    lastStruggleAt: 0,
+    lastDurationMs: 0,
+    lastChange: null as AbrStatus["lastChange"],
+    bytes: [] as { ts: number; bytes: number }[],
+    status: null as AbrStatus | null,
+  };
 
   ensureRunning() {
     if (this.timer) return;
@@ -178,6 +206,7 @@ class Supervisor {
   payload(): AutomationPayload {
     return {
       settings: this.settings,
+      abr: this.abr.status,
       ingest: INGEST,
       obsConnected: this.obsConnected,
       warnings: this.warnings,
@@ -188,8 +217,9 @@ class Supervisor {
   async update(patch: Partial<AutomationSettings>) {
     const next = { ...this.settings, ...patch };
     for (const [k, v] of Object.entries(patch)) {
-      if (this.settings[k as keyof AutomationSettings] !== v)
-        this.event("info", `${LABELS[k as keyof AutomationSettings]} turned ${v ? "on" : "off"}`);
+      if (this.settings[k as keyof AutomationSettings] === v) continue;
+      const label = LABELS[k as keyof AutomationSettings];
+      this.event("info", typeof v === "boolean" ? `${label} turned ${v ? "on" : "off"}` : `${label} set to ${v}`);
     }
     this.settings = next;
     // Re-arm after an operator's change, e.g. after fixing whatever made keep-live give up.
@@ -246,6 +276,7 @@ class Supervisor {
       if (this.obsConnected) this.event("warning", `Lost contact with OBS: ${(e as Error).message}`);
       this.obsConnected = false;
       this.obsLaunch.connectedSince = 0;
+      this.abr.status = null;
       if (this.settings.launchObs) await this.maybeLaunchObs(add, mtxReady, Date.now());
       this.frames = [];
       for (const w of codecWarnings(null, out?.ready ? out.tracks : [])) add(w);
@@ -347,6 +378,120 @@ class Supervisor {
     }
 
     await this.checkQuality(obs, stream, add, now);
+    await this.checkBitrate(obs, stream, out, add, now);
+  }
+
+  get abrStatus(): AbrStatus | null {
+    return this.abr.status;
+  }
+
+  /** Adaptive bitrate: measure viewers, then recommend or (in auto mode) apply a new bitrate. */
+  private async checkBitrate(
+    obs: ObsSession,
+    stream: StreamStatus,
+    out: PathInfo | undefined,
+    add: (w: HealthWarning) => void,
+    now: number,
+  ) {
+    const a = this.abr;
+    // A stream that stopped or restarted starts over at the profile's bitrate.
+    if (!stream.active || stream.durationMs < a.lastDurationMs) {
+      a.bytes = [];
+      a.lastChangeAt = 0;
+      a.lastStruggleAt = now;
+      await clearBitrateRequest();
+    }
+    a.lastDurationMs = stream.active ? stream.durationMs : 0;
+
+    let outputKbps: number | null = null;
+    if (stream.active) {
+      a.bytes.push({ ts: now, bytes: stream.bytes });
+      while (a.bytes.length > 1 && now - a.bytes[1].ts >= OUTPUT_RATE_WINDOW_MS) a.bytes.shift();
+      const [first, last] = [a.bytes[0], a.bytes.at(-1)!];
+      if (last.ts > first.ts) outputKbps = Math.round(((last.bytes - first.bytes) * 8) / (last.ts - first.ts));
+    }
+
+    const [script, ceiling] = await Promise.all([readScriptStatus(), getSavedBitrate(obs).catch(() => null)]);
+    const scriptLive = script?.active ? script : null;
+    const current = scriptLive?.bitrate ?? ceiling;
+    const encoder = script?.encoder ?? null;
+    const canApply = !!scriptLive && isLiveCapable(encoder);
+
+    const measured = viewers.metrics(now);
+    const infos = measured.map(viewerInfo);
+    if (infos.some((v) => v.health === "network")) a.lastStruggleAt = now;
+    const device = infos.filter((v) => v.health === "device");
+    if (device.length)
+      add({
+        id: "viewer-device",
+        level: "warning",
+        title: `${device.length} ${device.length === 1 ? "viewer's device" : "viewers' devices"} can't keep up with the video`,
+        detail:
+          "They drop frames without losing packets, which a lower bitrate won't fix. Lowering OBS's output " +
+          "resolution (Settings → Video → Output (Scaled) Resolution) helps; it applies when the stream restarts.",
+      });
+
+    const mode = this.settings.adaptiveBitrate;
+    let recommendation: AbrStatus["recommendation"] = null;
+    if (mode !== "off" && stream.active && current && ceiling) {
+      const d = decide({
+        now,
+        current,
+        ceiling,
+        min: this.settings.minBitrate,
+        health: infos.map((v) => v.health),
+        lastChangeAt: a.lastChangeAt,
+        lastStruggleAt: a.lastStruggleAt,
+      });
+      if (d.action !== "hold") {
+        if (mode === "auto" && canApply) await this.applyBitrate(current, d.target, d.reason, true);
+        else recommendation = { direction: d.action, target: d.target, reason: d.reason };
+      }
+    }
+    if (mode === "auto" && stream.active && !canApply)
+      add({
+        id: "abr-script",
+        level: "warning",
+        title: "Automatic bitrate can't change the bitrate",
+        detail: !scriptLive
+          ? `Add the live bitrate script in OBS (Tools → Scripts → +): ${SCRIPT_PATH}. Until then it only recommends.`
+          : `The encoder "${encoder}" doesn't change bitrate while streaming. Use x264 or NVENC, or set Adaptive bitrate to Recommend.`,
+      });
+
+    a.status = {
+      mode,
+      streamActive: stream.active,
+      current: stream.active ? current : ceiling,
+      ceiling,
+      min: this.settings.minBitrate,
+      outputKbps,
+      script: { state: script ? "ok" : "missing", path: SCRIPT_PATH, encoder, liveCapable: isLiveCapable(encoder) },
+      viewers: infos,
+      unmeasured: Math.max(0, (out?.readers ?? 0) - measured.length),
+      recommendation,
+      lastChange: a.lastChange,
+    };
+  }
+
+  private async applyBitrate(from: number, to: number, reason: string, auto: boolean) {
+    await requestBitrate(to);
+    const a = this.abr;
+    a.lastChangeAt = Date.now();
+    a.lastChange = { ts: a.lastChangeAt, from, to, reason, auto };
+    // Keep the recommendation from reappearing before the next check.
+    if (a.status) a.status = { ...a.status, current: to, recommendation: null, lastChange: a.lastChange };
+    this.event("info", `${auto ? "Automatically " : ""}${to < from ? "lowered" : "raised"} the bitrate ${from} → ${to} kbps: ${reason}`);
+  }
+
+  /** Apply a bitrate now through the OBS script, without restarting the stream. */
+  async setLiveBitrate(kbps: number) {
+    const s = this.abr.status;
+    if (!s?.streamActive || !s.current) throw new Error("The stream isn't live");
+    if (s.script.state !== "ok") throw new Error("The live bitrate script isn't loaded in OBS");
+    if (!s.script.liveCapable) throw new Error(`The encoder "${s.script.encoder}" can't change bitrate while streaming`);
+    if (!isValidBitrate(kbps) || (s.ceiling && kbps > s.ceiling))
+      throw new Error(`Choose a bitrate up to the configured ${s.ceiling} kbps`);
+    await this.applyBitrate(s.current, kbps, "set by the operator", false);
   }
 
   private async checkCameras(obs: ObsSession, add: (w: HealthWarning) => void, now: number) {
@@ -464,6 +609,8 @@ const LABELS: Record<keyof AutomationSettings, string> = {
   reconnectCameras: "Reconnect cameras",
   keepWhip: "Keep OBS on WHIP",
   launchObs: "Launch OBS",
+  adaptiveBitrate: "Adaptive bitrate",
+  minBitrate: "Minimum bitrate (kbps)",
 };
 
 const g = globalThis as unknown as { __avSupervisor?: Supervisor };

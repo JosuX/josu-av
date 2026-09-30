@@ -121,3 +121,7 @@ export const OBS_BIN = process.env.AV_OBS_BIN ?? "obs";
 export const OBS_EXTRA_ARGS = (process.env.AV_OBS_ARGS ?? "").split(/\s+/).filter(Boolean);
 /** Process name OBS runs under (pgrep -x). */
 export const OBS_PROCESS = process.env.AV_OBS_PROCESS ?? OBS_BIN.split("/").pop()!;
+
+/** Panel state: automation switches, and the files shared with the OBS live-bitrate script. */
+export const STATE_DIR =
+  process.env.AV_STATE_DIR ?? `${process.env.XDG_STATE_HOME ?? `${process.env.HOME}/.local/state`}/av-control`;

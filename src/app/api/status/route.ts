@@ -24,6 +24,7 @@ export async function GET() {
     processes,
     paths,
     warnings: supervisor.warnings,
+    abr: supervisor.abrStatus,
     stream: { ingest: INGEST, input: INPUT_PATH, output: OUTPUT_PATH, inputReady, outputReady, webrtcPort: WEBRTC_PORT },
   } satisfies StatusPayload);
 }

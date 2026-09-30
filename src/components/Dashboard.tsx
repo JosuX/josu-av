@@ -9,6 +9,7 @@ import { ProcessCard } from "./ProcessCard";
 import { StreamCard } from "./StreamCard";
 import { SystemCharts } from "./SystemCharts";
 import { HealthAlerts } from "./HealthAlerts";
+import { ViewerHealthCard } from "./ViewerHealthCard";
 import { fetchStatus, procAction, useStatus } from "./hooks";
 import type { ProcName, StatusPayload } from "./types";
 
@@ -104,6 +105,8 @@ export function Dashboard() {
             : [0, 1].map((i) => <Skeleton key={i} className="h-64 w-full rounded-xl" />)}
         </div>
       </div>
+
+      {status?.abr && <ViewerHealthCard abr={status.abr} onChange={refresh} />}
     </div>
   );
 }
