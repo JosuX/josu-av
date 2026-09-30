@@ -20,15 +20,20 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { BITRATE_MAX, BITRATE_MIN, isValidBitrate } from "@/lib/shared";
+import { BITRATE_MAX, BITRATE_MIN, FPS_OPTIONS, X264_PRESETS, fpsLabel, isValidBitrate } from "@/lib/shared";
 import { StateBadge } from "./StateBadge";
 import { AutomationCard } from "./AutomationCard";
 import { formatBytes, formatDuration } from "./format";
 import type { ObsPayload } from "./types";
 
-type Busy = "url" | "bitrate" | "restart" | "whip" | "launch" | null;
+type Busy = "url" | "apply" | "restart" | "whip" | "launch" | null;
 
-type ActionResult = { ok: true; effectiveBitrate?: number | null; savedBitrate?: number | null } | null;
+type ActionResult = {
+  ok: true;
+  restarted?: boolean;
+  effectiveBitrate?: number | null;
+  savedBitrate?: number | null;
+} | null;
 
 async function obsAction(body: Record<string, unknown>): Promise<ActionResult> {
   try {
@@ -39,6 +44,7 @@ async function obsAction(body: Record<string, unknown>): Promise<ActionResult> {
     });
     const data = (await res.json().catch(() => ({}))) as {
       error?: string;
+      restarted?: boolean;
       effectiveBitrate?: number | null;
       savedBitrate?: number | null;
     };
@@ -46,7 +52,12 @@ async function obsAction(body: Record<string, unknown>): Promise<ActionResult> {
       toast.error(data.error ?? "OBS request failed");
       return null;
     }
-    return { ok: true, effectiveBitrate: data.effectiveBitrate, savedBitrate: data.savedBitrate };
+    return {
+      ok: true,
+      restarted: data.restarted,
+      effectiveBitrate: data.effectiveBitrate,
+      savedBitrate: data.savedBitrate,
+    };
   } catch (e) {
     toast.error((e as Error).message);
     return null;
@@ -59,6 +70,8 @@ export function ObsSettings() {
   // Drafts stay untouched by polling until saved or reset.
   const [urlDrafts, setUrlDrafts] = useState<Record<string, string>>({});
   const [bitrateDraft, setBitrateDraft] = useState<string | null>(null);
+  const [presetDraft, setPresetDraft] = useState<string | null>(null);
+  const [fpsDraft, setFpsDraft] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -129,17 +142,39 @@ export function ObsSettings() {
   const bitrate = bitrateDraft ?? String(encoder.bitrate);
   const bitrateNum = Number(bitrate);
   const bitrateValid = isValidBitrate(bitrateNum);
-  const bitrateDirty = bitrateDraft !== null && bitrateNum !== encoder.bitrate;
-  const applyBitrate = bitrateDirty && bitrateValid && !encoder.unsupported;
+  const bitrateDirty = bitrateDraft !== null && bitrateNum !== encoder.bitrate && !encoder.unsupported;
+  const presetDirty = presetDraft !== null && presetDraft !== encoder.preset;
+  const currentFps = fpsLabel(encoder.fps);
+  const fpsDirty = fpsDraft !== null && fpsDraft !== currentFps;
+  const dirty = bitrateDirty || presetDirty || fpsDirty;
+  const changes = [
+    bitrateDirty && `${bitrateNum} kbps`,
+    presetDirty && `preset ${presetDraft}`,
+    fpsDirty && `${fpsDraft} fps`,
+  ].filter(Boolean);
+  const resetDrafts = () => {
+    setBitrateDraft(null);
+    setPresetDraft(null);
+    setFpsDraft(null);
+  };
 
-  const restart = async () => {
-    if (!applyBitrate) {
-      await run("restart", { action: "restart-stream" }, stream.active ? "Stream restarted" : "Stream started");
+  const apply = async () => {
+    const result = await run("apply", {
+      action: "apply-output",
+      ...(bitrateDirty && { bitrate: bitrateNum }),
+      ...(presetDirty && { preset: presetDraft }),
+      ...(fpsDirty && { fps: FPS_OPTIONS.find((o) => o.label === fpsDraft)?.fps }),
+    });
+    if (!result) return;
+    resetDrafts();
+    if (!result.restarted) {
+      toast.success(fpsDirty && !bitrateDirty && !presetDirty ? "Frame rate changed" : "Saved; it applies when the stream starts");
       return;
     }
-    const result = await run("bitrate", { action: "set-bitrate", bitrate: bitrateNum, restart: true });
-    if (!result) return;
-    setBitrateDraft(null);
+    if (!bitrateDirty) {
+      toast.success("Applied; the stream restarted");
+      return;
+    }
     const eff = result.effectiveBitrate;
     if (result.savedBitrate !== bitrateNum)
       toast.error(
@@ -312,37 +347,88 @@ export function ObsSettings() {
                 className="font-mono sm:max-w-48"
                 aria-invalid={!bitrateValid}
               />
-              <p className="text-xs text-muted-foreground">
-                {encoder.effectiveBitrate != null && encoder.effectiveBitrate !== encoder.bitrate
-                  ? `Saved ${encoder.bitrate} kbps takes effect on the next stream restart. `
-                  : ""}
-                OBS only applies a new bitrate when the stream starts, so applying it restarts the stream.
-              </p>
+              {encoder.effectiveBitrate != null && encoder.effectiveBitrate !== encoder.bitrate && (
+                <p className="text-xs text-muted-foreground">
+                  Saved {encoder.bitrate} kbps takes effect on the next stream restart.
+                </p>
+              )}
             </div>
           )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {encoder.preset !== null && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="preset">Encoder preset</Label>
+                <select
+                  id="preset"
+                  value={presetDraft ?? encoder.preset}
+                  onChange={(e) => setPresetDraft(e.target.value)}
+                  className={SELECT_CLASS}
+                >
+                  {X264_PRESETS.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="fps">Frame rate (fps)</Label>
+              <select
+                id="fps"
+                value={fpsDraft ?? currentFps}
+                onChange={(e) => setFpsDraft(e.target.value)}
+                className={SELECT_CLASS}
+              >
+                {!FPS_OPTIONS.some((o) => o.label === currentFps) && <option value={currentFps}>{currentFps}</option>}
+                {FPS_OPTIONS.map((o) => (
+                  <option key={o.label} value={o.label}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {encoder.preset !== null &&
+              "Faster presets use less CPU for slightly lower quality; if OBS drops frames from encoding lag, pick a faster one or a lower frame rate. "}
+            OBS only takes these when the stream starts, so applying them to a live stream restarts it.
+          </p>
         </CardContent>
         <CardFooter className="flex-wrap gap-2">
-          <ConfirmRestart
-            title={
-              applyBitrate
-                ? `Apply ${bitrateNum} kbps and restart the stream?`
-                : stream.active
-                  ? "Restart the stream?"
-                  : "Start the stream?"
-            }
-            trigger={
-              <Button
-                variant={applyBitrate ? "default" : "outline"}
-                disabled={busy !== null || (bitrateDirty && !bitrateValid)}
-              >
-                {busy === "restart" || busy === "bitrate" ? <Loader2 className="animate-spin" /> : <RotateCw />}
-                {applyBitrate ? "Apply & restart stream" : stream.active ? "Restart stream" : "Start stream"}
-              </Button>
-            }
-            onConfirm={restart}
-          />
-          {bitrateDirty && (
-            <Button variant="ghost" onClick={() => setBitrateDraft(null)} disabled={busy !== null}>
+          {dirty && stream.active ? (
+            <ConfirmRestart
+              title={`Apply ${changes.join(", ")} and restart the stream?`}
+              trigger={
+                <Button disabled={busy !== null || (bitrateDirty && !bitrateValid)}>
+                  {busy === "apply" ? <Loader2 className="animate-spin" /> : <RotateCw />}
+                  Apply &amp; restart stream
+                </Button>
+              }
+              onConfirm={apply}
+            />
+          ) : dirty ? (
+            <Button onClick={apply} disabled={busy !== null || (bitrateDirty && !bitrateValid)}>
+              {busy === "apply" ? <Loader2 className="animate-spin" /> : <Save />}
+              Apply
+            </Button>
+          ) : (
+            <ConfirmRestart
+              title={stream.active ? "Restart the stream?" : "Start the stream?"}
+              trigger={
+                <Button variant="outline" disabled={busy !== null || (bitrateDraft !== null && !bitrateValid)}>
+                  {busy === "restart" ? <Loader2 className="animate-spin" /> : <RotateCw />}
+                  {stream.active ? "Restart stream" : "Start stream"}
+                </Button>
+              }
+              onConfirm={() =>
+                run("restart", { action: "restart-stream" }, stream.active ? "Stream restarted" : "Stream started")
+              }
+            />
+          )}
+          {(dirty || bitrateDraft !== null) && (
+            <Button variant="ghost" onClick={resetDrafts} disabled={busy !== null}>
               Reset
             </Button>
           )}
@@ -351,6 +437,9 @@ export function ObsSettings() {
     </Layout>
   );
 }
+
+const SELECT_CLASS =
+  "h-9 w-full rounded-md border border-input bg-transparent px-3 font-mono text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:max-w-48 dark:bg-input/30 [&_option]:bg-popover";
 
 function ConfirmRestart({
   title,

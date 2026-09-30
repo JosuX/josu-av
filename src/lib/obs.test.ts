@@ -5,6 +5,7 @@ import {
   encoderCodec,
   parseEffectiveBitrate,
   parseEncoderStarts,
+  applyOutput,
   restartStream,
   stoppedByPanel,
   switchToWhip,
@@ -76,6 +77,10 @@ function fakeObs({ active = true, startFailures = 0, serviceFails = false } = {}
           break;
         case "SetStreamServiceSettings":
           if (serviceFails) throw new ObsError("SetStreamServiceSettings failed");
+          break;
+        case "SetVideoSettings":
+          // Like OBS: refused while an output is active.
+          if (active) throw new ObsError("SetVideoSettings failed: Video settings cannot be changed while an output is active.");
           break;
       }
       return {} as T;
@@ -160,5 +165,23 @@ describe("encoderCodec", () => {
     ["jim_av1_nvenc", "AV1"],
   ])("%s → %s", (id, codec) => {
     expect(encoderCodec(id)).toBe(codec);
+  });
+});
+
+describe("applyOutput", () => {
+  afterEach(() => stoppedByPanel(live));
+
+  it("changes the frame rate of a live stream by stopping it once", async () => {
+    const { obs, calls, isActive } = fakeObs();
+    expect(await applyOutput(obs, { fps: { num: 30, den: 1 } })).toBe(true);
+    expect(isActive()).toBe(true);
+    expect(calls.filter((c) => c !== "GetStreamStatus")).toEqual(["StopStream", "SetVideoSettings", "StartStream"]);
+  });
+
+  it("changes an idle stream's frame rate without starting it", async () => {
+    const { obs, calls, isActive } = fakeObs({ active: false });
+    expect(await applyOutput(obs, { fps: { num: 30, den: 1 } })).toBe(false);
+    expect(isActive()).toBe(false);
+    expect(calls).not.toContain("StartStream");
   });
 });

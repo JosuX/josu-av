@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { OBS_CONFIG_DIR, OBS_WS_PASSWORD, OBS_WS_URL, WHIP_URL } from "./config";
+import { X264_PRESETS, type Fps, type OutputPatch } from "./shared";
 
 // Minimal obs-websocket v5 client. One connection is opened on first use and shared by
 // every request until OBS closes it (e.g. OBS quits); the next request then reconnects.
@@ -205,10 +206,15 @@ export interface EncoderInfo {
   rateControl: string;
   /** Why the bitrate cannot be changed from here, if it cannot. */
   unsupported: string | null;
+  /** x264's speed preset; null for encoders whose preset the panel doesn't manage. */
+  preset: string | null;
+  /** OBS's output frame rate. */
+  fps: Fps;
 }
 
-// obs_x264's default since OBS 32 (was 2500 before).
+// obs_x264's defaults (bitrate since OBS 32; it was 2500 before).
 const DEFAULT_BITRATE = 6000;
+const DEFAULT_X264_PRESET = "veryfast";
 
 /**
  * The video bitrate of every stream-encoder settings block in an OBS log, oldest first; OBS
@@ -298,14 +304,20 @@ async function encoderFile(obs: ObsSession) {
   return { profile: currentProfileName, file, settings };
 }
 
+export async function getVideoFps(obs: ObsSession): Promise<Fps> {
+  const v = await obs.call<{ fpsNumerator: number; fpsDenominator: number }>("GetVideoSettings");
+  return { num: v.fpsNumerator, den: v.fpsDenominator };
+}
+
 export async function getEncoder(obs: ObsSession): Promise<EncoderInfo> {
   const outputMode = await profileParam(obs, "Output", "Mode");
   const advanced = outputMode === "Advanced";
-  const [encoder, simpleBitrate, { profile, settings }, effectiveBitrate] = await Promise.all([
+  const [encoder, simpleBitrate, { profile, settings }, effectiveBitrate, fps] = await Promise.all([
     advanced ? profileParam(obs, "AdvOut", "Encoder") : profileParam(obs, "SimpleOutput", "StreamEncoder"),
     advanced ? null : profileParam(obs, "SimpleOutput", "VBitrate"),
     encoderFile(obs),
     getEffectiveBitrate(),
+    getVideoFps(obs),
   ]);
   const rateControl = String(settings.rate_control ?? "CBR");
   return {
@@ -320,6 +332,8 @@ export async function getEncoder(obs: ObsSession): Promise<EncoderInfo> {
       : !["CBR", "VBR", "ABR"].includes(rateControl.toUpperCase())
         ? `The encoder uses ${rateControl} rate control, which ignores bitrate.`
         : null,
+    preset: advanced && encoder === "obs_x264" ? String(settings.preset ?? DEFAULT_X264_PRESET) : null,
+    fps,
   };
 }
 
@@ -338,14 +352,32 @@ export function encoderCodec(id: string): "H.264" | "H.265" | "AV1" | "VP9" {
   return "H.264";
 }
 
-export async function setBitrate(obs: ObsSession, kbps: number) {
+/** Write encoder settings to the profile; OBS reads them when the stream next starts. */
+async function updateEncoderFile(obs: ObsSession, patch: { bitrate?: number; preset?: string }) {
   const info = await getEncoder(obs);
-  if (info.unsupported) throw new ObsError(info.unsupported);
+  if (patch.bitrate !== undefined && info.unsupported) throw new ObsError(info.unsupported);
+  if (patch.preset !== undefined && info.preset === null)
+    throw new ObsError(`Presets can only be changed here for x264 in Advanced output mode (the encoder is ${info.encoder}).`);
   const { file, settings } = await encoderFile(obs);
-  settings.bitrate = kbps;
+  if (patch.bitrate !== undefined) settings.bitrate = patch.bitrate;
+  if (patch.preset !== undefined && (X264_PRESETS as readonly string[]).includes(patch.preset)) settings.preset = patch.preset;
   const tmp = `${file}.av-tmp`;
   await writeFile(tmp, JSON.stringify(settings));
   await rename(tmp, file);
+}
+
+/**
+ * Apply bitrate, preset and frame rate. OBS only takes encoder settings when the stream starts
+ * and only changes the frame rate while nothing is output, so a live stream is stopped, changed
+ * and started again once. Resolves with whether the stream was restarted.
+ */
+export async function applyOutput(obs: ObsSession, patch: OutputPatch): Promise<boolean> {
+  if (patch.bitrate !== undefined || patch.preset !== undefined)
+    await updateEncoderFile(obs, { bitrate: patch.bitrate, preset: patch.preset });
+  return withStreamStopped(obs, async () => {
+    if (patch.fps)
+      await obs.call("SetVideoSettings", { fpsNumerator: patch.fps.num, fpsDenominator: patch.fps.den });
+  });
 }
 
 /**
@@ -459,7 +491,11 @@ async function startStream(obs: ObsSession) {
  * Run `change` with the stream stopped, then start it again. The stream is restarted even
  * if `change` fails, so a bad setting never leaves the assembly without a feed.
  */
-async function withStreamStopped(obs: ObsSession, change: () => Promise<void>, { startIfIdle = false } = {}) {
+async function withStreamStopped(
+  obs: ObsSession,
+  change: () => Promise<void>,
+  { startIfIdle = false } = {},
+): Promise<boolean> {
   if (state.restarting) throw new ObsBusyError("A stream restart is already in progress");
   state.restarting = true;
   try {
@@ -476,6 +512,7 @@ async function withStreamStopped(obs: ObsSession, change: () => Promise<void>, {
     }
     if (wasActive || startIfIdle) await startStream(obs);
     if (changeError) throw changeError;
+    return wasActive;
   } finally {
     state.restarting = false;
   }

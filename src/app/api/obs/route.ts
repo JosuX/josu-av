@@ -8,7 +8,7 @@ import {
   listNetworkSources,
   markEncoderLog,
   restartStream,
-  setBitrate,
+  applyOutput,
   setSourceUrl,
   stoppedByPanel,
   switchToWhip,
@@ -18,7 +18,7 @@ import {
 } from "@/lib/obs";
 import { INGEST, WHIP_URL } from "@/lib/config";
 import { ObsLaunchError, launchObs } from "@/lib/obs-launch";
-import { BITRATE_MAX, BITRATE_MIN, isValidBitrate } from "@/lib/shared";
+import { parseOutputPatch } from "@/lib/shared";
 const URL_SCHEMES = ["rtsp:", "rtsps:", "rtmp:", "rtmps:", "http:", "https:", "srt:", "udp:", "rtp:"];
 
 function fail(e: unknown) {
@@ -48,7 +48,7 @@ export async function GET() {
 
 type Body =
   | { action: "set-source-url"; input: string; url: string }
-  | { action: "set-bitrate"; bitrate: number; restart?: boolean }
+  | { action: "apply-output"; bitrate?: number; preset?: string; fps?: { num: number; den: number } }
   | { action: "restart-stream" }
   | { action: "use-whip" }
   | { action: "launch" };
@@ -76,30 +76,26 @@ export async function POST(req: Request) {
       }
       break;
     }
-    case "set-bitrate": {
-      const { bitrate, restart } = body as Extract<Body, { action: "set-bitrate" }>;
-      if (!isValidBitrate(bitrate)) {
-        return Response.json(
-          { error: `Bitrate must be a whole number between ${BITRATE_MIN} and ${BITRATE_MAX} kbps` },
-          { status: 400 },
-        );
-      }
+    case "apply-output": {
+      const parsed = parseOutputPatch(body as Record<string, unknown>);
+      if ("error" in parsed) return Response.json({ error: parsed.error }, { status: 400 });
+      const { patch } = parsed;
+      let restarted: boolean;
       let savedBitrate: number | null;
       let effectiveBitrate: number | null = null;
       try {
         const mark = await markEncoderLog();
-        savedBitrate = await withObs(async (obs) => {
-          await setBitrate(obs, bitrate);
-          if (restart) await restartStream(obs);
-          return getSavedBitrate(obs);
+        [restarted, savedBitrate] = await withObs(async (obs) => {
+          const r = await applyOutput(obs, patch);
+          return [r, await getSavedBitrate(obs)] as const;
         });
-        if (restart) effectiveBitrate = await waitForEncoderStart(mark);
+        if (restarted && patch.bitrate !== undefined) effectiveBitrate = await waitForEncoderStart(mark);
       } catch (e) {
         return fail(e);
       }
       // Report what OBS actually started with and what the profile now holds, so a
       // silently ignored or overwritten setting is visible.
-      return Response.json({ ok: true, savedBitrate, effectiveBitrate });
+      return Response.json({ ok: true, restarted, savedBitrate, effectiveBitrate });
     }
     case "restart-stream":
       try {

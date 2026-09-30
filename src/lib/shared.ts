@@ -164,6 +164,68 @@ export interface AutomationPayload {
   events: AutomationEvent[];
 }
 
+/** x264's speed presets, fastest first. Faster ones use less CPU for slightly lower quality. */
+export const X264_PRESETS = [
+  "ultrafast",
+  "superfast",
+  "veryfast",
+  "faster",
+  "fast",
+  "medium",
+  "slow",
+  "slower",
+  "veryslow",
+] as const;
+
+export interface Fps {
+  num: number;
+  den: number;
+}
+
+/** Frame rates offered in Settings. */
+export const FPS_OPTIONS: { label: string; fps: Fps }[] = [
+  { label: "24", fps: { num: 24, den: 1 } },
+  { label: "25", fps: { num: 25, den: 1 } },
+  { label: "29.97", fps: { num: 30000, den: 1001 } },
+  { label: "30", fps: { num: 30, den: 1 } },
+  { label: "50", fps: { num: 50, den: 1 } },
+  { label: "59.94", fps: { num: 60000, den: 1001 } },
+  { label: "60", fps: { num: 60, den: 1 } },
+];
+
+export function fpsLabel(f: Fps) {
+  return FPS_OPTIONS.find((o) => o.fps.num === f.num && o.fps.den === f.den)?.label ?? String(+(f.num / f.den).toFixed(2));
+}
+
+/** Stream output changes applied together (with one restart when live). */
+export interface OutputPatch {
+  bitrate?: number;
+  preset?: (typeof X264_PRESETS)[number];
+  fps?: Fps;
+}
+
+export function parseOutputPatch(body: Record<string, unknown>): { patch: OutputPatch } | { error: string } {
+  const patch: OutputPatch = {};
+  if (body.bitrate !== undefined) {
+    if (typeof body.bitrate !== "number" || !isValidBitrate(body.bitrate))
+      return { error: `Bitrate must be a whole number between ${BITRATE_MIN} and ${BITRATE_MAX} kbps` };
+    patch.bitrate = body.bitrate;
+  }
+  if (body.preset !== undefined) {
+    if (!X264_PRESETS.includes(body.preset as OutputPatch["preset"] & string)) return { error: "Unknown encoder preset" };
+    patch.preset = body.preset as OutputPatch["preset"];
+  }
+  if (body.fps !== undefined) {
+    const f = body.fps as Partial<Fps> | null;
+    const ok = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
+    if (!f || !ok(f.num) || !ok(f.den) || f.num! / f.den! < 1 || f.num! / f.den! > 120)
+      return { error: "Frame rate must be between 1 and 120 fps" };
+    patch.fps = { num: f.num!, den: f.den! };
+  }
+  if (!Object.keys(patch).length) return { error: "Nothing to change" };
+  return { patch };
+}
+
 /** Payload of GET /api/status. */
 export interface StatusPayload {
   processes: ProcStatus[];

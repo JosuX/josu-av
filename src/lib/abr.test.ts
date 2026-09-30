@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DOWN_COOLDOWN_MS, UP_AFTER_MS, decide, type AbrInput } from "./abr";
 import { classifyViewer, viewerMetrics, type ViewerMetrics } from "./viewers";
 import { isLiveCapable, parseScriptStatus } from "./live-bitrate";
-import { parseAutomationPatch } from "./shared";
+import { fpsLabel, parseAutomationPatch, parseOutputPatch } from "./shared";
 
 const NOW = 100 * 60_000;
 const base: AbrInput = {
@@ -147,5 +147,25 @@ describe("parseAutomationPatch", () => {
     expect(parseAutomationPatch({ minBitrate: 10 })).toHaveProperty("error");
     expect(parseAutomationPatch({ keepWhip: "yes" })).toHaveProperty("error");
     expect(parseAutomationPatch({ nope: true })).toHaveProperty("error");
+  });
+});
+
+describe("parseOutputPatch", () => {
+  it("accepts bitrate, x264 preset and frame rate", () => {
+    expect(parseOutputPatch({ bitrate: 4500, preset: "veryfast", fps: { num: 30000, den: 1001 } })).toEqual({
+      patch: { bitrate: 4500, preset: "veryfast", fps: { num: 30000, den: 1001 } },
+    });
+  });
+  it("rejects bad values and empty changes", () => {
+    for (const body of [{ bitrate: 1 }, { preset: "turbo" }, { fps: { num: 500, den: 1 } }, { fps: { num: 30 } }, {}])
+      expect(parseOutputPatch(body), JSON.stringify(body)).toHaveProperty("error");
+  });
+});
+
+describe("fpsLabel", () => {
+  it("names common rates and falls back to the number", () => {
+    expect(fpsLabel({ num: 30000, den: 1001 })).toBe("29.97");
+    expect(fpsLabel({ num: 60, den: 1 })).toBe("60");
+    expect(fpsLabel({ num: 15, den: 1 })).toBe("15");
   });
 });

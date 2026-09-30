@@ -130,7 +130,7 @@ export function frameWarnings(from: FrameSample, to: FrameSample): HealthWarning
     to.encodeSkipped - from.encodeSkipped,
     to.encodeTotal - from.encodeTotal,
     "OBS is dropping frames (encoding lag)",
-    "The encoder is overloaded; use a hardware encoder or a faster preset, or lower the resolution.",
+    "The encoder is overloaded; pick a faster encoder preset or a lower frame rate under Settings → Stream output, or use a hardware encoder.",
   );
   check(
     "quality-rendering",
