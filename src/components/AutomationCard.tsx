@@ -22,13 +22,13 @@ const MODES: { value: BitrateMode; label: string; description: string }[] = [
   {
     value: "recommend",
     label: "Recommend",
-    description: "Suggests a bitrate on the dashboard when viewers struggle, for you to apply.",
+    description: "Suggests a lower bitrate on the dashboard when viewers struggle, for you to apply.",
   },
   {
     value: "auto",
     label: "Automatic",
     description:
-      "Lowers the bitrate when most viewers lose packets and raises it after 10 quiet minutes, live, without restarting the stream. Never above the bitrate saved in Stream output.",
+      "Lowers the bitrate when most viewers struggle (losing packets or lagging) and raises it after 10 smooth minutes, live, without restarting the stream. Never above the bitrate saved in Stream output.",
   },
 ];
 

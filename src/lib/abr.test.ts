@@ -54,6 +54,26 @@ describe("decide", () => {
   it("does not raise while any viewer struggles", () => {
     const quiet = { ...base, current: 4000, lastStruggleAt: 0, lastChangeAt: 0 };
     expect(decide({ ...quiet, health: ["network", "good", "good"] }).action).toBe("hold");
+    expect(decide({ ...quiet, health: ["device", "good", "good"] }).action).toBe("hold");
+  });
+
+  it("lowers the bitrate for lagging devices too", () => {
+    expect(decide({ ...base, health: ["device"] })).toMatchObject({
+      action: "down",
+      target: 4800,
+      reason: "1 of 1 viewer is lagging",
+    });
+    expect(decide({ ...base, health: ["device", "device", "good"] })).toMatchObject({
+      action: "down",
+      reason: "2 of 3 viewers are lagging",
+    });
+  });
+
+  it("counts packet loss and lag together", () => {
+    expect(decide({ ...base, health: ["network", "device", "good", "good"] })).toMatchObject({
+      action: "down",
+      reason: "2 of 4 viewers are struggling (1 losing packets, 1 lagging)",
+    });
   });
 });
 

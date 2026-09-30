@@ -179,14 +179,15 @@ its browser's WebRTC stats (packets lost, frames dropped, time frozen) every 5 s
 watch elsewhere, such as MediaMTX's player page, are counted but can't be measured.
 
 Over a 25 s window each viewer is **smooth**, **losing packets** (2% or more lost, or frozen
-while losing some: the network can't keep up), or **device lagging** (dropping frames without
-loss: the device can't decode fast enough, which a lower bitrate won't fix; the dashboard
-suggests lowering OBS's output resolution instead).
+while losing some: the network can't keep up), or **lagging** (dropping frames or freezing
+without loss: the device can't decode smoothly, or the stream stalled before reaching it).
 
-- When half or more of the measured viewers are losing packets, the bitrate drops 20%, then
-  waits 30 s before judging again. It never goes below the floor (default 1500 kbps).
-- After 10 minutes with no one losing packets it rises 10% at a time, never above the bitrate
-  saved under Settings → Stream output.
+- When half or more of the measured viewers are struggling, losing packets or lagging, the
+  bitrate drops 20%, then waits 30 s before judging again. It never goes below the floor
+  (default 1500 kbps). For lagging devices a lower bitrate eases decoding; if they keep lagging,
+  the dashboard suggests lowering OBS's output resolution, which helps most.
+- After 10 minutes with no one struggling it rises 10% at a time, never above the bitrate saved
+  in Settings → Stream output.
 
 Set the mode under Settings → Automation: **Off** (stats only), **Recommend** (the default; the
 dashboard suggests a bitrate for you to apply), or **Automatic**.

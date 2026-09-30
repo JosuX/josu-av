@@ -447,7 +447,7 @@ class Supervisor {
     const measured = viewers.metrics(now);
     const infos = measured.map(viewerInfo);
     this.logViewerHealth(infos);
-    if (infos.some((v) => v.health === "network")) a.lastStruggleAt = now;
+    if (infos.some((v) => v.health === "network" || v.health === "device")) a.lastStruggleAt = now;
     const device = infos.filter((v) => v.health === "device");
     if (device.length)
       add({
@@ -455,8 +455,11 @@ class Supervisor {
         level: "warning",
         title: `${device.length} ${device.length === 1 ? "viewer's device" : "viewers' devices"} can't keep up with the video`,
         detail:
-          "They drop frames without losing packets, which a lower bitrate won't fix. Lowering OBS's output " +
-          "resolution (Settings → Video → Output (Scaled) Resolution) helps; it applies when the stream restarts.",
+          (this.settings.adaptiveBitrate === "auto"
+            ? "They drop frames or freeze without losing packets; automatic bitrate lowers the bitrate to ease decoding. "
+            : "They drop frames or freeze without losing packets; a lower bitrate eases decoding. ") +
+          "If it keeps happening, lowering OBS's output resolution (Settings → Video → Output (Scaled) Resolution) " +
+          "helps most; it applies when the stream restarts.",
       });
 
     const mode = this.settings.adaptiveBitrate;
