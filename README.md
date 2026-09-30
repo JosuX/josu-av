@@ -223,10 +223,19 @@ trusted network, or restrict it with the host firewall.
 ## Development
 
 ```bash
-pnpm test        # vitest
+pnpm test        # unit tests (vitest)
+pnpm test:e2e    # browser tests (Playwright)
 pnpm typecheck
 pnpm lint
 ```
+
+The browser tests build the panel and run it on test-only ports (panel 3290, viewer port 18080)
+against a MediaMTX of their own (`e2e/fixtures/mediamtx.yml`, ports 18554/18889/18189/19997)
+fed a synthetic H.264 + Opus stream by ffmpeg, with no OBS, so they can run next to a live
+setup. They need `mediamtx`, `ffmpeg` (libx264, libopus) and an installed Chrome or Chromium,
+since Playwright's own Chromium can't decode H.264; set `E2E_CHROMIUM` to pick one. They
+cover the viewer port (watch page plays, controls refused), the dashboard (feed plays, live
+push instead of polling), viewer detection and analysis, and Settings without OBS.
 
 Server code lives in `src/lib` (`procman.ts`, `obs.ts`, `mediamtx.ts`, `sysstats.ts`) and is
 exposed through the route handlers in `src/app/api`. `src/lib/shared.ts` holds the constants and

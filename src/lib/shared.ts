@@ -231,7 +231,7 @@ export interface StatusPayload {
   processes: ProcStatus[];
   paths: PathInfo[] | null;
   warnings: HealthWarning[];
-  /** Null until OBS has been reached. */
+  /** Null until the first automation check. */
   abr: AbrStatus | null;
   stream: {
     /** "whip": OBS publishes Opus straight to `input` (== `output`); "rtmp": FFmpeg bridges them. */

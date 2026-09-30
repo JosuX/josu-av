@@ -1,0 +1,16 @@
+# MediaMTX for the browser tests: its own ports, so it runs alongside a real instance.
+logLevel: info
+api: yes
+apiAddress: 127.0.0.1:19997
+rtsp: yes
+rtspTransports: [tcp]
+rtspAddress: 127.0.0.1:18554
+rtmp: no
+hls: no
+srt: no
+moq: no
+webrtc: yes
+webrtcAddress: :18889
+webrtcLocalUDPAddress: :18189
+paths:
+  all_others:

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { viewerRoute } from "./viewer-port";
 
 describe("viewerRoute", () => {
@@ -40,5 +40,16 @@ describe("viewerRoute", () => {
       "//settings",
     ])
       expect(viewerRoute("GET", url), url).toBe("deny");
+  });
+});
+
+describe("viewerRoute in development", () => {
+  it("lets the dev server's hot-reload socket through, without which the page never starts", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.resetModules();
+    const { viewerRoute: devRoute } = await import("./viewer-port");
+    expect(devRoute("GET", "/_next/hmr?id=abc")).toBe("forward");
+    expect(devRoute("GET", "/settings")).toBe("deny");
+    vi.unstubAllEnvs();
   });
 });

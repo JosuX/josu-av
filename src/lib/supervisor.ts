@@ -284,7 +284,7 @@ class Supervisor {
       if (this.obsConnected) this.event("warning", `Lost contact with OBS: ${(e as Error).message}`);
       this.obsConnected = false;
       this.obsLaunch.connectedSince = 0;
-      this.abr.status = null;
+      this.abr.status = this.viewersWithoutObs(out, Date.now());
       if (this.settings.launchObs) await this.maybeLaunchObs(add, mtxReady, Date.now());
       this.frames = [];
       for (const w of codecWarnings(null, out?.ready ? out.tracks : [])) add(w);
@@ -478,6 +478,24 @@ class Supervisor {
       unmeasured: Math.max(0, (out?.readers ?? 0) - measured.length),
       recommendation,
       lastChange: a.lastChange,
+    };
+  }
+
+  /** Viewer health while OBS is unreachable: players still report, bitrate is unknown. */
+  private viewersWithoutObs(out: PathInfo | undefined, now: number): AbrStatus {
+    const measured = viewers.metrics(now);
+    return {
+      mode: this.settings.adaptiveBitrate,
+      streamActive: !!out?.ready,
+      current: null,
+      ceiling: null,
+      min: this.settings.minBitrate,
+      outputKbps: null,
+      script: { state: "missing", path: SCRIPT_PATH, encoder: null, liveCapable: false },
+      viewers: measured.map(viewerInfo),
+      unmeasured: Math.max(0, (out?.readers ?? 0) - measured.length),
+      recommendation: null,
+      lastChange: this.abr.lastChange,
     };
   }
 
