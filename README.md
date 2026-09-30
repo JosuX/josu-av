@@ -207,6 +207,12 @@ on a second port, `AV_VIEWER_PORT` (8080), that serves only the viewer page: `/`
 (`/api/watch`) and the playback-stats endpoint are forwarded to the panel. Everything else gets
 a 404, including every control endpoint. Share `http://<host>:8080` with viewers.
 
+The page starts **with sound** where the browser allows it (desktop browsers on a site the
+person has used before). Browsers refuse sound before the person interacts with the page (most
+phones always do), so then it plays muted with a "Tap for sound" prompt, and the first tap or key
+anywhere on the page turns the sound on; it stays on across reconnects. `/watch?muted` starts
+muted; the dashboard's embedded preview uses that.
+
 Viewers on this page report playback stats like the dashboard's player, so they count towards
 [adaptive bitrate](#adaptive-bitrate); they show up as "(watch page)" in the viewer list.
 The live-feed card's link opens this page.

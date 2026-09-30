@@ -6,7 +6,7 @@ import { useLive } from "./hooks";
 import type { WatchPayload } from "@/lib/shared";
 
 /** The viewer page: the live video, or a notice until the stream starts. */
-export function WatchPlayer() {
+export function WatchPlayer({ sound = true }: { sound?: boolean }) {
   const { data: state } = useLive<WatchPayload>("watch", "/api/watch");
 
   return (
@@ -14,7 +14,7 @@ export function WatchPlayer() {
       {state?.live ? (
         // Kept mounted while live; the player reconnects by itself after a drop.
         <div className="w-full max-w-[min(100%,calc(100dvh*16/9))]">
-          <VideoFeed path={state.path} port={state.webrtcPort} source="watch page" />
+          <VideoFeed path={state.path} port={state.webrtcPort} source="watch page" sound={sound} />
         </div>
       ) : (
         <div className="flex max-w-xs flex-col items-center gap-3 px-6 text-center text-white/70">

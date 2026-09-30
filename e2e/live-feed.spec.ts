@@ -15,13 +15,15 @@ test("the Live feed card switches between /assembly and /watch, with matching li
   // /watch: the viewer page embedded, playing, and the link follows.
   await card.getByRole("radio", { name: "/watch" }).click();
   const iframe = card.locator('iframe[title="Viewer page"]');
-  await expect(iframe).toHaveAttribute("src", new RegExp(`:${E2E.viewerPort}/watch$`));
+  await expect(iframe).toHaveAttribute("src", new RegExp(`:${E2E.viewerPort}/watch\\?muted=1$`));
   await expect(open).toHaveAttribute("href", new RegExp(`:${E2E.viewerPort}/watch$`));
   const frame = page.frames().find((f) => f.url().includes(`:${E2E.viewerPort}/`)) ?? (await (await iframe.elementHandle())!.contentFrame())!;
   await frame.waitForFunction(() => {
     const v = document.querySelector("video");
     return !!v && v.videoWidth > 0 && v.currentTime > 1;
   });
+  // The preview never starts playing sound inside the control panel.
+  expect(await frame.evaluate(() => document.querySelector("video")!.muted)).toBe(true);
 
   // The choice sticks across reloads.
   await page.reload();

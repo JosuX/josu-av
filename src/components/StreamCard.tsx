@@ -134,7 +134,8 @@ export function StreamCard({ status }: { status: StatusPayload }) {
           activeTab === "watch" ? (
             <iframe
               key={watchUrl}
-              src={watchUrl!}
+              // Muted: the preview shouldn't start playing sound in the control panel.
+              src={`${watchUrl}?muted=1`}
               title="Viewer page"
               allow="autoplay; fullscreen"
               className="aspect-video w-full rounded-lg border-0 bg-black"

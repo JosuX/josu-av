@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, VolumeX } from "lucide-react";
+import { Loader2, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ViewerReport } from "@/lib/shared";
 import { deviceLabel } from "./format";
@@ -54,16 +54,25 @@ export function VideoFeed({
   path,
   port,
   source = "dashboard",
+  sound = false,
 }: {
   path: string;
   port: number;
   /** Where the player runs; shown next to the device in the viewer list. */
   source?: "dashboard" | "watch page";
+  /**
+   * Start with sound. Browsers only allow that once the person has interacted with the site
+   * (phones rarely do before a tap), so when refused it plays muted and the first tap or key
+   * anywhere turns the sound on.
+   */
+  sound?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [phase, setPhase] = useState<Phase>("connecting");
   const [error, setError] = useState<string | null>(null);
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(!sound);
+  /** Sound was wanted but the browser refused it until the person interacts. */
+  const [needsTap, setNeedsTap] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const failures = useRef(0);
 
@@ -107,7 +116,16 @@ export function VideoFeed({
       // Play as soon as frames arrive instead of building up a playout buffer (LAN, low jitter).
       if ("jitterBufferTarget" in ev.receiver) ev.receiver.jitterBufferTarget = 0;
       const v = videoRef.current;
-      if (v && ev.streams[0] && v.srcObject !== ev.streams[0]) v.srcObject = ev.streams[0];
+      if (!v || !ev.streams[0] || v.srcObject === ev.streams[0]) return;
+      v.srcObject = ev.streams[0];
+      v.play().catch((e: DOMException) => {
+        if (e.name !== "NotAllowedError" || v.muted || cancelled) return;
+        // Sound isn't allowed yet: play muted, and ask for a tap.
+        v.muted = true;
+        setMuted(true);
+        setNeedsTap(true);
+        v.play().catch(() => {});
+      });
     };
     pc.onconnectionstatechange = () => {
       clearTimeout(grace);
@@ -160,9 +178,30 @@ export function VideoFeed({
     };
   }, [path, port, attempt, source]);
 
+  // Any tap, click or key on the page counts as the interaction that allows sound.
+  useEffect(() => {
+    if (!needsTap) return;
+    const unmute = () => {
+      const v = videoRef.current;
+      if (v) {
+        v.muted = false;
+        void v.play().catch(() => {});
+      }
+      setMuted(false);
+      setNeedsTap(false);
+    };
+    const opts = { once: true, capture: true } as const;
+    document.addEventListener("pointerdown", unmute, opts);
+    document.addEventListener("keydown", unmute, opts);
+    return () => {
+      document.removeEventListener("pointerdown", unmute, opts);
+      document.removeEventListener("keydown", unmute, opts);
+    };
+  }, [needsTap]);
+
   return (
     <div className="relative overflow-hidden rounded-lg bg-black aspect-video">
-      <video ref={videoRef} autoPlay playsInline muted={muted} controls={phase === "playing"} className="h-full w-full" />
+      <video ref={videoRef} playsInline muted={muted} controls={phase === "playing"} className="h-full w-full" />
       {phase !== "playing" && (
         <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-white/70">
           <Loader2 className="size-4 animate-spin" />
@@ -179,10 +218,20 @@ export function VideoFeed({
           </span>
         )}
       </div>
-      {phase === "playing" && muted && (
-        <Button size="sm" variant="secondary" onClick={() => setMuted(false)} className="absolute top-3 right-3">
-          <VolumeX /> Unmute
-        </Button>
+      {phase === "playing" && needsTap ? (
+        <button
+          type="button"
+          className="absolute inset-x-0 bottom-14 mx-auto flex w-max items-center gap-2 rounded-full bg-black/70 px-4 py-2.5 text-sm font-medium text-white shadow-lg backdrop-blur"
+        >
+          <Volume2 className="size-4" /> Tap for sound
+        </button>
+      ) : (
+        phase === "playing" &&
+        muted && (
+          <Button size="sm" variant="secondary" onClick={() => setMuted(false)} className="absolute top-3 right-3">
+            <VolumeX /> Unmute
+          </Button>
+        )
       )}
     </div>
   );
