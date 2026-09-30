@@ -109,9 +109,9 @@ export function Dashboard() {
       {status ? (
         <KpiStrip status={status} />
       ) : (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-[6.5rem] rounded-xl" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className={cn("h-[6.5rem] rounded-xl", i === 2 && "col-span-2 lg:col-span-1")} />
           ))}
         </div>
       )}

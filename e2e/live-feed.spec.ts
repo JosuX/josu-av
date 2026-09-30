@@ -30,14 +30,13 @@ test("the Live feed card switches between /assembly and /watch, with matching li
   await expect(card.getByRole("radio", { name: "/watch" })).toHaveAttribute("data-state", "on");
 });
 
-test("the stat tiles show viewers, bitrate, picture and playback", async ({ page }) => {
+test("the stat tiles show viewers, bitrate and playback", async ({ page }) => {
   await page.goto("/");
   await page.locator('[data-slot="card"]').filter({ hasText: "Live feed" }).getByRole("radio", { name: "/assembly" }).click();
   await expectPlaying(page);
 
   await expect(page.getByText("LIVE", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("640×360").first()).toBeVisible(); // reported by the player
-  await expect(page.getByText(/30 fps · H264 · Opus/)).toBeVisible();
+  await expect(page.getByText("Picture", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/^\d{1,3}(,\d{3})*kbps$/).first()).toBeVisible(); // bitrate in
   await expect(page.getByText(/1 dashboard/)).toBeVisible();
   await expect(page.getByText("All smooth")).toBeVisible({ timeout: 60_000 });

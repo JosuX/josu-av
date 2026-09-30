@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Gauge, MonitorPlay, Users } from "lucide-react";
+import { Activity, Gauge, Users } from "lucide-react";
 import { motion } from "motion/react";
 import CountUp from "./reactbits/CountUp";
 import SpotlightCard from "./reactbits/SpotlightCard";
@@ -10,7 +10,7 @@ import type { StatusPayload } from "./types";
 
 const MODE: Record<string, string> = { off: "Adaptive off", recommend: "Adaptive: recommend", auto: "Adaptive: automatic" };
 
-/** The stream at a glance: viewers, bitrate, picture and playback health. */
+/** The stream at a glance: viewers, bitrate and playback health. */
 export function KpiStrip({ status }: { status: StatusPayload }) {
   const { stream, paths, abr } = status;
   const out = paths?.find((p) => p.name === stream.output);
@@ -23,8 +23,6 @@ export function KpiStrip({ status }: { status: StatusPayload }) {
   // "Measuring" only until someone has a verdict; one newcomer doesn't hide everyone else's.
   const judged = viewers.filter((v) => !v.hidden && v.health !== "unknown");
   const measuring = viewers.length > 0 && judged.length === 0;
-  // Every viewer receives the same stream; any one that reports a picture size will do.
-  const picture = viewers.find((v) => v.resolution);
   const target = abr?.streamActive ? abr.current : null;
 
   const breakdown = abr
@@ -36,7 +34,7 @@ export function KpiStrip({ status }: { status: StatusPayload }) {
     : [];
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
       <Tile index={0} icon={Users} label="Viewers">
         <Big>
           <CountUp to={total} duration={0.6} />
@@ -61,16 +59,7 @@ export function KpiStrip({ status }: { status: StatusPayload }) {
         </Sub>
       </Tile>
 
-      <Tile index={2} icon={MonitorPlay} label="Picture">
-        <Big>{live && picture?.resolution ? picture.resolution : <Dash />}</Big>
-        <Sub>
-          {[picture?.fps != null && `${Math.round(picture.fps)} fps`, live && out?.tracks.length && out.tracks.join(" · ")]
-            .filter(Boolean)
-            .join(" · ") || (live ? "Shown once a player reports" : "—")}
-        </Sub>
-      </Tile>
-
-      <Tile index={3} icon={Activity} label="Playback" tone={struggling ? "bad" : judged.length ? "good" : undefined}>
+      <Tile index={2} icon={Activity} label="Playback" className="col-span-2 lg:col-span-1" tone={struggling ? "bad" : judged.length ? "good" : undefined}>
         <Big>
           {!viewers.length ? (
             <Dash />
@@ -101,9 +90,11 @@ function Tile({
   icon: Icon,
   label,
   tone,
+  className,
   children,
 }: {
   index: number;
+  className?: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   tone?: "good" | "bad";
@@ -114,6 +105,7 @@ function Tile({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, ease: EASE, delay: 0.04 * index }}
+      className={className}
     >
       <SpotlightCard className="h-full p-4">
         <div className="flex items-center justify-between">

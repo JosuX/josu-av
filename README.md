@@ -23,9 +23,8 @@ OBS ──RTMP──▶ MediaMTX /assembly ──RTSP──▶ FFmpeg (AAC → O
 
 ## Pages
 
-- **Dashboard** (`/`): a LIVE/offline badge with how long it's been live, four stat tiles
-  (viewers by page, bitrate received and OBS's target, picture size and codecs, playback
-  health), the live feed with `/assembly` and `/watch` tabs, share and open-in-new-tab, the
+- **Dashboard** (`/`): a LIVE/offline badge with how long it's been live, three stat tiles
+  (viewers by page, bitrate received and OBS's target, playback health), the live feed with `/assembly` and `/watch` tabs, share and open-in-new-tab, the
   viewers list with each one's playback and any bitrate recommendation, MediaMTX with its
   controls (command line under Details), and compact network and memory charts at the bottom.
 - **Log monitor** (`/logs`): live, filterable logs with download: each process's output, plus
