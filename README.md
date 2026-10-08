@@ -109,6 +109,39 @@ Differences from Linux:
 - **Launch OBS.** OBS is started directly from its install folder; Windows doesn't close it
   when the panel exits.
 
+## Desktop app
+
+The panel also comes as a desktop app (Electron, in `electron/`): one program that runs the
+panel's server and shows the panel in its own window. On Windows it builds to a single portable
+`.exe` that needs no Node.js, pnpm or install.
+
+```bash
+pnpm desktop:win      # dist/AV-Control-<version>-portable.exe (builds on Linux too)
+pnpm desktop:linux    # dist/AV-Control-<version>.AppImage
+pnpm desktop          # run it from the source tree
+```
+
+To use the `.exe`, put it in a folder with `mediamtx.exe` and `mediamtx.yml` from MediaMTX's
+Windows zip (and `ffmpeg.exe` for RTMP ingest); the app uses them from there. Other settings
+are the variables in [Configuration](#configuration), set in the environment or as `KEY=value`
+lines in an `av-control.env` file in the same folder (or in `%APPDATA%\AV Control`), e.g.:
+
+```ini
+PORT=3000
+AV_VIEWER_PORT=8080
+AV_OBS_WS_PASSWORD=secret
+```
+
+- **Closing the window** hides it to the tray: phones, tablets and viewers keep using the
+  server at `http://<host>:3000` and `:8080`. **Quit** in the tray menu stops the server and,
+  with it, MediaMTX.
+- **A panel already running** on the port (another copy, or the systemd service on Linux) is
+  shown instead of starting a second one.
+- **Logs.** The server's output goes to `logs/server.log` in the app's data folder
+  (`%APPDATA%\AV Control`, on Linux `~/.config/AV Control`); the tray menu opens it.
+- The portable `.exe` unpacks itself on every start, so it takes a few seconds to open.
+  Windows Firewall asks about **AV Control** on first start; allow it on private networks.
+
 ## Configuration
 
 Everything has a default that matches the original hand-run setup. Override with environment
