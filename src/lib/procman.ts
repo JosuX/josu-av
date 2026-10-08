@@ -1,8 +1,9 @@
 import "server-only";
 import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { PDEATHSIG, PROCS, PROC_NAMES, type ProcName, type ProcSpec } from "./config";
+import { IS_WINDOWS, PDEATHSIG, PROCS, PROC_NAMES, type ProcName, type ProcSpec } from "./config";
 import { LOG_MAX_LINES } from "./shared";
+import { findWindowsProcesses } from "./winproc";
 
 export type LogStream = "stdout" | "stderr" | "system";
 
@@ -39,8 +40,11 @@ const RESTART_DELAY_MS = 3000;
 /** A run at least this long ends a crash streak: the next exit counts as the first again. */
 const STABLE_RUN_MS = 30_000;
 const KILL_TIMEOUT_MS = 5000;
-/** How long a pgrep result is reused; status is polled by every open dashboard. */
-const EXTERNAL_CACHE_MS = 1000;
+/**
+ * How long a pgrep result is reused; status is polled by every open dashboard. Longer on
+ * Windows, where the lookup goes through tasklist or PowerShell.
+ */
+const EXTERNAL_CACHE_MS = IS_WINDOWS ? 5000 : 1000;
 
 /**
  * Split a chunk of output into complete lines, carrying the unterminated tail over.
@@ -146,6 +150,8 @@ export class ManagedProcess extends EventEmitter {
     const child = spawn(...spawnArgv(this.spec), {
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
+      // Without this, Windows opens a console window for each child.
+      windowsHide: true,
     });
     this.child = child;
 
@@ -252,7 +258,7 @@ class ProcessManager {
       ManagedProcess
     >;
     // Next turns SIGINT/SIGTERM into process.exit(), so this covers graceful shutdowns;
-    // the pdeathsig wrapper covers the server being killed outright.
+    // the pdeathsig wrapper covers the server being killed outright (Linux only).
     const shutdown = () => {
       for (const p of Object.values(this.procs)) p.child?.kill("SIGTERM");
     };
@@ -267,11 +273,14 @@ class ProcessManager {
   private pgrep(name: ProcName): Promise<number[]> {
     const cached = this.pgrepCache.get(name);
     if (cached && Date.now() - cached.at < EXTERNAL_CACHE_MS) return cached.pids;
-    const pids = new Promise<number[]>((resolve) => {
-      execFile("pgrep", ["-f", PROCS[name].externalPattern], (_err, stdout) => {
-        resolve(stdout.split("\n").map((s) => Number(s.trim())).filter(Boolean));
-      });
-    });
+    const { externalPattern, windowsExternal } = PROCS[name];
+    const pids = IS_WINDOWS
+      ? findWindowsProcesses(windowsExternal.image, windowsExternal.cmdline)
+      : new Promise<number[]>((resolve) => {
+          execFile("pgrep", ["-f", externalPattern], (_err, stdout) => {
+            resolve(stdout.split("\n").map((s) => Number(s.trim())).filter(Boolean));
+          });
+        });
     this.pgrepCache.set(name, { at: Date.now(), pids });
     return pids;
   }

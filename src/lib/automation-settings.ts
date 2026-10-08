@@ -1,8 +1,9 @@
 import "server-only";
 import { readFileSync } from "node:fs";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { STATE_DIR } from "./config";
+import { replaceFile } from "./files";
 import { DEFAULT_AUTOMATION, parseAutomationPatch, type AutomationSettings } from "./shared";
 
 // Operator choices persist across restarts, in AV_STATE_DIR (default ~/.local/state/av-control).
@@ -33,7 +34,5 @@ export function loadAutomationSettings(): AutomationSettings {
 
 export async function saveAutomationSettings(settings: AutomationSettings) {
   await mkdir(STATE_DIR, { recursive: true });
-  const tmp = `${FILE}.tmp`;
-  await writeFile(tmp, JSON.stringify(settings, null, 2));
-  await rename(tmp, FILE);
+  await replaceFile(FILE, JSON.stringify(settings, null, 2));
 }

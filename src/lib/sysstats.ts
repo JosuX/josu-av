@@ -1,6 +1,9 @@
 import "server-only";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
+import { freemem, totalmem } from "node:os";
+import { IS_WINDOWS } from "./config";
 import { STATS_HISTORY } from "./shared";
 
 export interface StatSample {
@@ -45,6 +48,41 @@ export function parseMeminfo(txt: string) {
   return { total, used: total - kb("MemAvailable") };
 }
 
+/**
+ * Byte counters summed over all adapters, from `netstat -e` on Windows: the first row with two
+ * numbers is Bytes (its label is translated, so it isn't matched).
+ */
+export function parseNetstatE(txt: string): { rx: number; tx: number } | null {
+  for (const line of txt.split(/\r?\n/)) {
+    const m = /^\D*?\s(\d+)\s+(\d+)\s*$/.exec(line);
+    if (m) return { rx: Number(m[1]), tx: Number(m[2]) };
+  }
+  return null;
+}
+
+const WINDOWS_IFACE = "all adapters";
+
+async function sampleWindows() {
+  const out = await new Promise<string>((resolve, reject) =>
+    execFile("netstat", ["-e"], { timeout: 5000, windowsHide: true }, (err, stdout) =>
+      err ? reject(err) : resolve(stdout),
+    ),
+  );
+  const total = totalmem();
+  return { iface: WINDOWS_IFACE, net: parseNetstatE(out), mem: { total, used: total - freemem() } };
+}
+
+async function sampleLinux() {
+  // Literal paths: a computed path makes Turbopack trace the whole project.
+  const [route, dev, meminfo] = await Promise.all([
+    readFile("/proc/net/route", "utf8"),
+    readFile("/proc/net/dev", "utf8"),
+    readFile("/proc/meminfo", "utf8"),
+  ]);
+  const iface = parseDefaultIface(route) ?? "lo";
+  return { iface, net: parseNetDev(dev, iface), mem: parseMeminfo(meminfo) };
+}
+
 class StatsSampler extends EventEmitter {
   history: StatSample[] = [];
   private timer: NodeJS.Timeout | null = null;
@@ -64,15 +102,7 @@ class StatsSampler extends EventEmitter {
 
   private async tick() {
     try {
-      // Literal paths: a computed path makes Turbopack trace the whole project.
-      const [route, dev, meminfo] = await Promise.all([
-        readFile("/proc/net/route", "utf8"),
-        readFile("/proc/net/dev", "utf8"),
-        readFile("/proc/meminfo", "utf8"),
-      ]);
-      const iface = parseDefaultIface(route) ?? "lo";
-      const net = parseNetDev(dev, iface);
-      const mem = parseMeminfo(meminfo);
+      const { iface, net, mem } = await (IS_WINDOWS ? sampleWindows() : sampleLinux());
       const now = Date.now();
       if (!net) return;
       const prev = this.prev;

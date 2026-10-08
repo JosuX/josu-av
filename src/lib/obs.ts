@@ -1,8 +1,9 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { INPUT_PATH, OBS_CONFIG_DIR, OBS_WS_PASSWORD, OBS_WS_URL, WHIP_URL } from "./config";
+import { replaceFile } from "./files";
 import { listPaths } from "./mediamtx";
 import { X264_PRESETS, type Fps, type OutputPatch } from "./shared";
 
@@ -223,7 +224,7 @@ const DEFAULT_X264_PRESET = "veryfast";
  * "bitrate:" line are recognised.
  */
 export function parseEncoderStarts(log: string): number[] {
-  const re = /encoder: '(?:advanced|simple)_video_stream'\] settings:\n(?:.*\n){0,8}?.*\tbitrate:\s*(\d+)/g;
+  const re = /encoder: '(?:advanced|simple)_video_stream'\] settings:\r?\n(?:.*\r?\n){0,8}?.*\tbitrate:\s*(\d+)/g;
   return Array.from(log.matchAll(re), (m) => Number(m[1]));
 }
 
@@ -362,9 +363,7 @@ async function updateEncoderFile(obs: ObsSession, patch: { bitrate?: number; pre
   const { file, settings } = await encoderFile(obs);
   if (patch.bitrate !== undefined) settings.bitrate = patch.bitrate;
   if (patch.preset !== undefined && (X264_PRESETS as readonly string[]).includes(patch.preset)) settings.preset = patch.preset;
-  const tmp = `${file}.av-tmp`;
-  await writeFile(tmp, JSON.stringify(settings));
-  await rename(tmp, file);
+  await replaceFile(file, JSON.stringify(settings), `${file}.av-tmp`);
 }
 
 /**

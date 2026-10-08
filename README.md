@@ -40,9 +40,10 @@ OBS ──RTMP──▶ MediaMTX /assembly ──RTSP──▶ FFmpeg (AAC → O
 
 ## Requirements
 
-- Linux (system stats come from `/proc`)
+- Linux or Windows 10/11
 - Node.js 24+ and pnpm
-- `mediamtx` and `pgrep` on `PATH` (plus `ffmpeg` in RTMP mode); `setpriv` (util-linux) is recommended, see below
+- `mediamtx` on `PATH` (plus `ffmpeg` in RTMP mode), or set `AV_MEDIAMTX_BIN`/`AV_FFMPEG_BIN` to their full paths
+- Linux only: `pgrep` on `PATH`; `setpriv` (util-linux) is recommended, see below
 - OBS 30+ (WHIP output, built-in obs-websocket v5) on the same host, with **Tools → WebSocket Server Settings → Enable WebSocket server** ticked
 
 ## Running
@@ -78,6 +79,36 @@ systemctl --user enable --now av-control
 loginctl enable-linger "$USER"   # keep it running while logged out
 ```
 
+### Windows
+
+Download MediaMTX's Windows zip and either add its folder to `PATH` or point
+`AV_MEDIAMTX_BIN` at `mediamtx.exe`. Windows has no standard place for MediaMTX's config, so
+set `AV_MEDIAMTX_CONFIG` to the `mediamtx.yml` from the zip; without it MediaMTX looks for
+`mediamtx.yml` in the panel's folder and otherwise runs on its built-in defaults. In PowerShell:
+
+```powershell
+$env:AV_MEDIAMTX_BIN = "C:\mediamtx\mediamtx.exe"
+$env:AV_MEDIAMTX_CONFIG = "C:\mediamtx\mediamtx.yml"
+pnpm build; pnpm start
+```
+
+To keep it running, start it at logon with Task Scheduler (**Run only when user is logged
+on**, so OBS can open on the desktop): program `pnpm.cmd`, arguments `start`, start in the
+project folder, with the variables above set as user environment variables. Allow Node.js
+and MediaMTX through Windows Defender Firewall when asked, on private networks only.
+
+Differences from Linux:
+
+- **Stopping processes.** Windows can't ask a process to exit gracefully the way SIGTERM does,
+  so Stop ends MediaMTX and FFmpeg immediately.
+- **Children outliving the panel.** There is no `setpriv` equivalent, so if the panel is killed
+  outright (Task Manager, a crash) MediaMTX keeps running. The panel then shows it as "running
+  outside this app" and offers to stop it.
+- **Network chart.** It shows traffic summed over all adapters (from `netstat -e`), not just the
+  LAN interface.
+- **Launch OBS.** OBS is started directly from its install folder; Windows doesn't close it
+  when the panel exits.
+
 ## Configuration
 
 Everything has a default that matches the original hand-run setup. Override with environment
@@ -86,7 +117,7 @@ variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AV_MEDIAMTX_BIN` | `mediamtx` | MediaMTX binary |
-| `AV_MEDIAMTX_CONFIG` | `/etc/mediamtx/mediamtx.yml` | MediaMTX config file |
+| `AV_MEDIAMTX_CONFIG` | `/etc/mediamtx/mediamtx.yml` (Windows: none, see [Windows](#windows)) | MediaMTX config file |
 | `AV_MEDIAMTX_API` | `http://127.0.0.1:9997` | MediaMTX control API; the panel enables it on this address (via `MTX_API`/`MTX_APIADDRESS`) when it starts MediaMTX |
 | `AV_MEDIAMTX_HLS` | `http://127.0.0.1:8888` | HLS server, used to probe readiness when the API is off |
 | `AV_WEBRTC_PORT` | `8889` | MediaMTX WebRTC port the browser connects to |
@@ -97,14 +128,14 @@ variables:
 | `AV_FFMPEG_BIN` | `ffmpeg` | FFmpeg binary (RTMP mode) |
 | `AV_OBS_WS_URL` | `ws://127.0.0.1:4455` | obs-websocket address |
 | `AV_OBS_WS_PASSWORD` | *(read from OBS's config)* | obs-websocket password |
-| `AV_OBS_CONFIG_DIR` | `$XDG_CONFIG_HOME/obs-studio` | OBS config directory (profiles, logs, websocket config) |
-| `AV_PDEATHSIG` | `1` | Set to `0` to spawn children directly instead of through `setpriv` |
-| `AV_OBS_BIN` | `obs` | OBS binary, for **Launch OBS** |
+| `AV_OBS_CONFIG_DIR` | `$XDG_CONFIG_HOME/obs-studio` (Windows: `%APPDATA%\obs-studio`) | OBS config directory (profiles, logs, websocket config) |
+| `AV_PDEATHSIG` | `1` | Set to `0` to spawn children directly instead of through `setpriv` (Linux only) |
+| `AV_OBS_BIN` | `obs` (Windows: `%ProgramFiles%\obs-studio\bin\64bit\obs64.exe`) | OBS binary, for **Launch OBS** |
 | `AV_OBS_ARGS` | *(none)* | Extra OBS arguments when the panel launches it, e.g. `--minimize-to-tray` |
-| `AV_OBS_PROCESS` | *(binary name)* | Process name used to tell whether OBS is running (`pgrep -x`) |
+| `AV_OBS_PROCESS` | *(binary name)* | Process name used to tell whether OBS is running (`pgrep -x`; on Windows the image name, e.g. `obs64.exe`) |
 | `AV_WEBRTC_INTERFACES` | *(the LAN interface, e.g. `wlo1`)* | Interfaces MediaMTX offers for WebRTC when the panel starts it (comma-separated; empty offers all) |
 | `AV_VIEWER_PORT` | `8080` | Port serving only the viewer page; `0` turns it off |
-| `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` | Where the automation switches are saved (`automation.json`), and the files shared with the OBS live-bitrate script |
+| `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` (Windows: `%LOCALAPPDATA%\av-control`) | Where the automation switches are saved (`automation.json`), and the files shared with the OBS live-bitrate script |
 
 The commands themselves are defined in `src/lib/config.ts`.
 
@@ -133,7 +164,8 @@ The commands themselves are defined in `src/lib/config.ts`.
   outright. Without `setpriv` a hard kill leaves them running; the panel then shows them as
   "running outside this app" and offers to stop them.
 - **External instances.** A MediaMTX or FFmpeg started from a terminal or systemd is detected
-  with `pgrep`, and the panel refuses to start a second one on the same ports.
+  with `pgrep` (on Windows `tasklist`, or PowerShell for FFmpeg's command line), and the panel
+  refuses to start a second one on the same ports.
 - **Bitrate.** OBS has no WebSocket request for encoder settings, so the panel writes the bitrate
   into the current profile's `streamEncoder.json` and restarts the stream, which makes OBS re-read
   the file. This needs OBS in **Advanced** output mode with CBR/VBR/ABR rate control. OBS rewrites
@@ -154,8 +186,9 @@ not a browser is open. Its switches are on the Settings page and are saved acros
 what it does is listed there under **Recent activity** and in the server log (`[automation]`).
 
 - **Launch OBS** (off by default). When MediaMTX is up and OBS isn't running, opens OBS on the
-  desktop, with `--startstreaming` if Keep stream live is on. It runs as its own systemd unit
-  (`uwsm app`, else `systemd-run --user`), so restarting the panel doesn't close it. Before
+  desktop, with `--startstreaming` if Keep stream live is on. On Linux it runs as its own
+  systemd unit (`uwsm app`, else `systemd-run --user`), so restarting the panel doesn't close
+  it; Windows never closes it with the panel. Before
   launching it deletes the crash markers in `obs-studio/.sentinel`, which would otherwise make
   OBS ask about Safe Mode (which disables the WebSocket server) and wait for an answer. It
   needs someone logged in to the desktop, gives up after 3 launches that don't stay connected
@@ -228,7 +261,8 @@ Viewers on this page report playback stats like the dashboard's player, so they 
 The live-feed card's link opens this page.
 
 The separate port only keeps viewers away from the controls if the firewall does too. With
-ufw, open the viewer page and WebRTC to the LAN, and the panel only to operators' devices:
+ufw (on Windows, the same rules in Windows Defender Firewall), open the viewer page and WebRTC
+to the LAN, and the panel only to operators' devices:
 
 ```bash
 sudo ufw allow from 192.168.1.0/24 to any port 8080 proto tcp   # viewer page
@@ -264,7 +298,7 @@ pnpm lint
 The browser tests build the panel and run it on test-only ports (panel 3290, viewer port 18080)
 against a MediaMTX of their own (`e2e/fixtures/mediamtx.yml`, ports 18554/18889/18189/19997)
 fed a synthetic H.264 + Opus stream by ffmpeg, with no OBS, so they can run next to a live
-setup. They need `mediamtx`, `ffmpeg` (libx264, libopus) and an installed Chrome or Chromium,
+setup. They need `mediamtx`, `ffmpeg` (libx264, libopus) on `PATH` and an installed Chrome or Chromium,
 since Playwright's own Chromium can't decode H.264; set `E2E_CHROMIUM` to pick one. They
 cover the viewer port (watch page plays, controls refused), the dashboard (feed plays, live
 push instead of polling), viewer detection and analysis, and Settings without OBS.

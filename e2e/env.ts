@@ -24,4 +24,11 @@ export const E2E = {
  */
 export const CHROMIUM =
   process.env.E2E_CHROMIUM ??
-  ["/usr/bin/chromium", "/usr/bin/google-chrome-stable", "/usr/bin/google-chrome"].find((p) => existsSync(p));
+  [
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    ...[process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env.LOCALAPPDATA]
+      .filter(Boolean)
+      .map((dir) => path.join(dir!, "Google", "Chrome", "Application", "chrome.exe")),
+  ].find((p) => existsSync(p));

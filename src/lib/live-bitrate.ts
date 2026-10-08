@@ -1,7 +1,8 @@
 import "server-only";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { STATE_DIR } from "./config";
+import { replaceFile } from "./files";
 
 // The bridge to obs/av-live-bitrate.lua, which runs inside OBS: the panel writes the bitrate it
 // wants to `obs-bitrate`, and the script applies it to the running encoder and reports what it
@@ -23,7 +24,8 @@ export interface ScriptStatus {
 export function parseScriptStatus(txt: string, now: number): ScriptStatus | null {
   const kv = Object.fromEntries(
     txt
-      .split("\n")
+      // The script writes CRLF on Windows.
+      .split(/\r?\n/)
       .filter((l) => l.includes("="))
       .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
   );
@@ -49,8 +51,7 @@ export function isLiveCapable(encoderId: string | null) {
 
 export async function requestBitrate(kbps: number) {
   await mkdir(STATE_DIR, { recursive: true });
-  await writeFile(`${REQUEST_FILE}.tmp`, `${kbps}\n`);
-  await rename(`${REQUEST_FILE}.tmp`, REQUEST_FILE);
+  await replaceFile(REQUEST_FILE, `${kbps}\n`);
 }
 
 /** Drop any pending request so a new stream starts at the profile's bitrate. */

@@ -14,17 +14,19 @@ describe("splitLines", () => {
   });
 });
 
-function sh(script: string, over: Partial<ProcSpec> = {}): ProcSpec {
+/** A spec that runs `script` in Node, which works the same on every platform (unlike sh). */
+function node(script: string, over: Partial<ProcSpec> = {}): ProcSpec {
   return {
     name: "ffmpeg",
     label: "test",
     shortLabel: "test",
     description: "",
-    bin: "sh",
-    args: ["-c", script],
+    bin: process.execPath,
+    args: ["-e", script],
     stopSignal: "SIGTERM",
     autoRestart: false,
     externalPattern: "^$",
+    windowsExternal: { image: "av-test.exe" },
     ...over,
   };
 }
@@ -55,7 +57,7 @@ describe("ManagedProcess", () => {
   });
 
   it("captures output and ends stopped after a clean exit", async () => {
-    const p = make(sh("echo hello; echo oops >&2"));
+    const p = make(node('console.log("hello"); console.error("oops")'));
     p.start();
     await waitFor(p, "running");
     await waitFor(p, "stopped");
@@ -69,14 +71,14 @@ describe("ManagedProcess", () => {
   });
 
   it("reports crashed on a non-zero exit", async () => {
-    const p = make(sh("exit 3"));
+    const p = make(node("process.exit(3)"));
     p.start();
     await waitFor(p, "crashed");
     expect(p.exitCode).toBe(3);
   });
 
   it("restarts on exit when autoRestart is set", async () => {
-    const p = make(sh("exit 1", { autoRestart: true }), 50);
+    const p = make(node("process.exit(1)", { autoRestart: true }), 50);
     p.start();
     await waitFor(p, "restarting");
     await waitFor(p, "running");
@@ -84,7 +86,7 @@ describe("ManagedProcess", () => {
   });
 
   it("stops a running process with its stop signal", async () => {
-    const p = make(sh("exec sleep 30"));
+    const p = make(node("setTimeout(() => {}, 30_000)"));
     p.start();
     await waitFor(p, "running");
     await p.stop();
@@ -100,7 +102,7 @@ describe("ManagedProcess watchdog", () => {
   });
 
   it("gives up after too many crashes in a row", async () => {
-    const p = new ManagedProcess(sh("exit 1", { autoRestart: true, watchdog: { maxDelayMs: 40, giveUpAfter: 2 } }), 10);
+    const p = new ManagedProcess(node("process.exit(1)", { autoRestart: true, watchdog: { maxDelayMs: 40, giveUpAfter: 2 } }), 10);
     procs.push(p);
     p.start();
     await waitFor(p, "crashed");
@@ -109,7 +111,7 @@ describe("ManagedProcess watchdog", () => {
   });
 
   it("backs off between restarts", async () => {
-    const p = new ManagedProcess(sh("exit 1", { autoRestart: true, watchdog: { maxDelayMs: 1000, giveUpAfter: 5 } }), 10);
+    const p = new ManagedProcess(node("process.exit(1)", { autoRestart: true, watchdog: { maxDelayMs: 1000, giveUpAfter: 5 } }), 10);
     procs.push(p);
     const delays: string[] = [];
     p.on("line", (l: { text: string }) => {
@@ -122,7 +124,7 @@ describe("ManagedProcess watchdog", () => {
   });
 
   it("does not restart a binary that cannot be started", async () => {
-    const p = new ManagedProcess({ ...sh("", { autoRestart: true }), bin: "/nonexistent/av-test-bin" }, 10);
+    const p = new ManagedProcess({ ...node("", { autoRestart: true }), bin: "/nonexistent/av-test-bin" }, 10);
     procs.push(p);
     p.start();
     await waitFor(p, "crashed");

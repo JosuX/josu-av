@@ -35,6 +35,10 @@ describe("parseEncoderStarts", () => {
   it("lists every stream start, oldest first", () => {
     expect(parseEncoderStarts(X264 + VAAPI + X264)).toEqual([6000, 1000, 6000]);
   });
+
+  it("reads CRLF logs (Windows)", () => {
+    expect(parseEncoderStarts((X264 + VAAPI).replace(/\n/g, "\r\n"))).toEqual([6000, 1000]);
+  });
 });
 
 describe("parseEffectiveBitrate", () => {

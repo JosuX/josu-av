@@ -157,6 +157,13 @@ describe("parseScriptStatus", () => {
   it("treats a stale status as no script", () => {
     expect(parseScriptStatus(txt(1000), 1_020_000)).toBeNull();
   });
+  it("reads CRLF line endings (the script on Windows)", () => {
+    expect(parseScriptStatus(txt(1000).replace(/\n/g, "\r\n"), 1_005_000)).toEqual({
+      active: true,
+      encoder: "obs_x264",
+      bitrate: 4800,
+    });
+  });
 });
 
 describe("isLiveCapable", () => {

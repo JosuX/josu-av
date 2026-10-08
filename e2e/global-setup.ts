@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, openSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, mkdirSync, openSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { E2E } from "./env";
@@ -27,7 +27,7 @@ async function waitForStream(timeoutMs: number) {
  */
 function run(bin: string, args: string[], env: Record<string, string> = {}): ChildProcess {
   const out = openSync(path.join(tmpdir(), `av-e2e-${path.basename(bin)}.log`), "w");
-  const child = spawn(bin, args, { stdio: ["ignore", out, out], env: { ...process.env, ...env } });
+  const child = spawn(bin, args, { stdio: ["ignore", out, out], env: { ...process.env, ...env }, windowsHide: true });
   child.on("error", (e) => console.error(`[e2e] could not start ${bin}: ${e.message}`));
   return child;
 }
@@ -42,12 +42,18 @@ export default async function globalSetup() {
   const binDir = path.join(tmpdir(), "av-e2e-bin");
   rmSync(binDir, { recursive: true, force: true });
   mkdirSync(binDir);
-  const real = execFileSync("sh", ["-c", "command -v mediamtx"], { encoding: "utf8" }).trim();
-  symlinkSync(real, path.join(binDir, "mediamtx-e2e"));
+  // Windows: symlinks need Developer Mode or admin rights, so copy the binary instead.
+  const windows = process.platform === "win32";
+  const real = windows
+    ? execFileSync("where", ["mediamtx"], { encoding: "utf8" }).split(/\r?\n/)[0].trim()
+    : execFileSync("sh", ["-c", "command -v mediamtx"], { encoding: "utf8" }).trim();
+  const bin = path.join(binDir, windows ? "mediamtx-e2e.exe" : "mediamtx-e2e");
+  if (windows) copyFileSync(real, bin);
+  else symlinkSync(real, bin);
   // Offer only the LAN interface for WebRTC, as the panel does for its own MediaMTX.
   const iface = lanInterface()?.name;
   const mediamtx = run(
-    path.join(binDir, "mediamtx-e2e"),
+    bin,
     [path.join(process.cwd(), "e2e", "fixtures", "mediamtx.yml")],
     iface ? { MTX_WEBRTCIPSFROMINTERFACESLIST: iface } : {},
   );

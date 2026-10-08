@@ -6,14 +6,20 @@
 --     to the running video encoder (x264 and NVENC change bitrate on the fly);
 --   * writes what the encoder runs at to <dir>/obs-bitrate-status, which tells the panel the
 --     script is loaded.
--- <dir> defaults to the panel's state directory, ~/.local/state/av-control.
+-- <dir> defaults to the panel's state directory: ~/.local/state/av-control, or on Windows
+-- %LOCALAPPDATA%\av-control.
 
 obs = obslua
 
 local dir = ""
 local last_applied = nil
 
+local windows = package.config:sub(1, 1) == "\\"
+
 local function default_dir()
+  if windows then
+    return (os.getenv("LOCALAPPDATA") or "") .. "\\av-control"
+  end
   local state = os.getenv("XDG_STATE_HOME")
   if state == nil or state == "" then
     state = (os.getenv("HOME") or "") .. "/.local/state"
@@ -42,6 +48,9 @@ local function write_status(active, encoder_id, bitrate)
   f:write("encoder=" .. (encoder_id or "") .. "\n")
   f:write("bitrate=" .. (bitrate and tostring(bitrate) or "") .. "\n")
   f:close()
+  if windows then
+    os.remove(path) -- Windows won't rename over an existing file.
+  end
   os.rename(path .. ".tmp", path)
 end
 
@@ -82,7 +91,8 @@ end
 
 function script_description()
   return "<b>AV Control: live bitrate</b><br>Lets the AV Control panel change the stream bitrate "
-    .. "without restarting the stream. Leave the folder empty to use ~/.local/state/av-control."
+    .. "without restarting the stream. Leave the folder empty to use the panel's default, "
+    .. "~/.local/state/av-control (on Windows %LOCALAPPDATA%\\av-control)."
 end
 
 function script_properties()

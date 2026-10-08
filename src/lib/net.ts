@@ -4,11 +4,13 @@ import { networkInterfaces } from "node:os";
 
 /** Virtual interfaces (containers, VPNs) whose addresses other LAN devices can't reach. */
 const VIRTUAL_IFACE = /^(lo|docker|br-|veth|virbr|vmnet|tailscale|tun|tap|wg|wt|zt)/;
+/** The same among Windows adapter names (Hyper-V/WSL, VM host-only networks, VPNs, Wi-Fi Direct). */
+const VIRTUAL_ADAPTER = /^(vEthernet|VirtualBox|VMware|Loopback|Tailscale|ZeroTier|Bluetooth|Local Area Connection\*)/i;
 
 /** The first physical interface with an IPv4 address, e.g. { name: "wlo1", address: "192.168.1.25" }. */
 export function lanInterface(): { name: string; address: string } | null {
   for (const [name, addrs] of Object.entries(networkInterfaces())) {
-    if (VIRTUAL_IFACE.test(name)) continue;
+    if (VIRTUAL_IFACE.test(name) || VIRTUAL_ADAPTER.test(name)) continue;
     const a = addrs?.find((x) => x.family === "IPv4" && !x.internal);
     if (a) return { name, address: a.address };
   }

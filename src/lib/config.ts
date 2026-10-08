@@ -2,7 +2,11 @@
 //   whip (default): OBS --WHIP (H.264 + Opus)--> mediamtx /assembly --WHEP--> browser
 //   rtmp:           OBS --rtmp--> mediamtx /assembly --ffmpeg (AAC -> Opus)--> /assembly-webrtc --WHEP--> browser
 
+import { homedir } from "node:os";
+import path from "node:path";
 import { lanInterface } from "./net";
+
+export const IS_WINDOWS = process.platform === "win32";
 
 export type ProcName = "mediamtx" | "ffmpeg";
 
@@ -26,9 +30,21 @@ export interface ProcSpec {
   watchdog?: { maxDelayMs: number; giveUpAfter: number };
   /** Pattern used to find instances started outside this app (pgrep -f). */
   externalPattern: string;
+  /**
+   * The same on Windows, which has no pgrep: the executable's image name, and a pattern its
+   * command line must match (unset: any instance of the image).
+   */
+  windowsExternal: { image: string; cmdline?: RegExp };
 }
 
 const MEDIAMTX_BIN = process.env.AV_MEDIAMTX_BIN ?? "mediamtx";
+/** "C:\tools\mediamtx.exe" → "mediamtx". */
+const exeName = (bin: string) => (bin.split(/[\\/]/).pop() ?? bin).replace(/\.exe$/i, "");
+/**
+ * MediaMTX's config file. Windows has no standard place for it, so there MediaMTX is left to
+ * find mediamtx.yml in its working directory (this app's folder) or use its built-in defaults.
+ */
+const MEDIAMTX_CONFIG = process.env.AV_MEDIAMTX_CONFIG ?? (IS_WINDOWS ? null : "/etc/mediamtx/mediamtx.yml");
 const RTSP = process.env.AV_RTSP_BASE ?? "rtsp://127.0.0.1:8554";
 export type Ingest = "whip" | "rtmp";
 /**
@@ -59,6 +75,9 @@ export const WEBRTC_INTERFACES = process.env.AV_WEBRTC_INTERFACES ?? lanInterfac
 /** Where OBS publishes in WHIP mode (OBS runs on this host). */
 export const WHIP_URL = `http://127.0.0.1:${WEBRTC_PORT}/${INPUT_PATH}/whip`;
 
+const FFMPEG_BIN = process.env.AV_FFMPEG_BIN ?? "ffmpeg";
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /** Declaration order is start order ("Start all"); "Stop all" goes in reverse. */
 export const PROCS: Record<ProcName, ProcSpec> = {
   mediamtx: {
@@ -67,7 +86,7 @@ export const PROCS: Record<ProcName, ProcSpec> = {
     shortLabel: "MediaMTX",
     description: "RTSP / RTMP / WebRTC media server",
     bin: MEDIAMTX_BIN,
-    args: [process.env.AV_MEDIAMTX_CONFIG ?? "/etc/mediamtx/mediamtx.yml"],
+    args: MEDIAMTX_CONFIG ? [MEDIAMTX_CONFIG] : [],
     // Enable the control API (local only) so the panel can see which paths are live,
     // without editing the root-owned config file.
     // The address comes from AV_MEDIAMTX_API so the panel polls the port MediaMTX listens on.
@@ -81,14 +100,15 @@ export const PROCS: Record<ProcName, ProcSpec> = {
     // (e.g. a bad config or a port in use), where retrying cannot help.
     autoRestart: true,
     watchdog: { maxDelayMs: 30_000, giveUpAfter: 5 },
-    externalPattern: `^(\\S*/)?${MEDIAMTX_BIN.split("/").pop()}( |$)`,
+    externalPattern: `^(\\S*/)?${exeName(MEDIAMTX_BIN)}( |$)`,
+    windowsExternal: { image: `${exeName(MEDIAMTX_BIN)}.exe` },
   },
   ffmpeg: {
     name: "ffmpeg",
     label: "FFmpeg (Opus for WebRTC)",
     shortLabel: "FFmpeg",
     description: "Re-encodes audio to Opus so the stream plays over WebRTC",
-    bin: process.env.AV_FFMPEG_BIN ?? "ffmpeg",
+    bin: FFMPEG_BIN,
     args: [
       "-hide_banner",
       "-nostdin",
@@ -107,6 +127,7 @@ export const PROCS: Record<ProcName, ProcSpec> = {
     // ffmpeg exits whenever OBS stops publishing; keep retrying until stopped.
     autoRestart: true,
     externalPattern: `^(\\S*/)?ffmpeg .*/${OUTPUT_PATH}$`,
+    windowsExternal: { image: `${exeName(FFMPEG_BIN)}.exe`, cmdline: new RegExp(`/${escapeRegExp(OUTPUT_PATH)}"?\\s*$`) },
   },
 };
 
@@ -115,9 +136,9 @@ export const PROC_NAMES = (Object.keys(PROCS) as ProcName[]).filter((n) => n !==
 
 /**
  * Spawn children through `setpriv --pdeathsig` so the kernel stops them if this server
- * dies without cleaning up (SIGKILL, crash). Set AV_PDEATHSIG=0 to disable.
+ * dies without cleaning up (SIGKILL, crash). Set AV_PDEATHSIG=0 to disable. Linux only.
  */
-export const PDEATHSIG = process.env.AV_PDEATHSIG !== "0";
+export const PDEATHSIG = process.env.AV_PDEATHSIG !== "0" && !IS_WINDOWS;
 
 export function isProcName(s: string): s is ProcName {
   return PROC_NAMES.includes(s as ProcName);
@@ -128,17 +149,27 @@ export const OBS_WS_URL = process.env.AV_OBS_WS_URL ?? "ws://127.0.0.1:4455";
 /** Falls back to the password stored in OBS's own websocket config when unset. */
 export const OBS_WS_PASSWORD = process.env.AV_OBS_WS_PASSWORD;
 export const OBS_CONFIG_DIR =
-  process.env.AV_OBS_CONFIG_DIR ?? `${process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`}/obs-studio`;
+  process.env.AV_OBS_CONFIG_DIR ??
+  (IS_WINDOWS
+    ? path.join(process.env.APPDATA ?? path.join(homedir(), "AppData", "Roaming"), "obs-studio")
+    : `${process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`}/obs-studio`);
 
 /** OBS binary, and extra arguments for when the panel launches it. */
-export const OBS_BIN = process.env.AV_OBS_BIN ?? "obs";
+export const OBS_BIN =
+  process.env.AV_OBS_BIN ??
+  (IS_WINDOWS
+    ? path.join(process.env.ProgramFiles ?? "C:\\Program Files", "obs-studio", "bin", "64bit", "obs64.exe")
+    : "obs");
 export const OBS_EXTRA_ARGS = (process.env.AV_OBS_ARGS ?? "").split(/\s+/).filter(Boolean);
-/** Process name OBS runs under (pgrep -x). */
-export const OBS_PROCESS = process.env.AV_OBS_PROCESS ?? OBS_BIN.split("/").pop()!;
+/** Process name OBS runs under (pgrep -x; on Windows the image name, e.g. obs64.exe). */
+export const OBS_PROCESS = process.env.AV_OBS_PROCESS ?? OBS_BIN.split(/[\\/]/).pop()!;
 
 /** Panel state: automation switches, and the files shared with the OBS live-bitrate script. */
 export const STATE_DIR =
-  process.env.AV_STATE_DIR ?? `${process.env.XDG_STATE_HOME ?? `${process.env.HOME}/.local/state`}/av-control`;
+  process.env.AV_STATE_DIR ??
+  (IS_WINDOWS
+    ? path.join(process.env.LOCALAPPDATA ?? path.join(homedir(), "AppData", "Local"), "av-control")
+    : `${process.env.XDG_STATE_HOME ?? `${process.env.HOME}/.local/state`}/av-control`);
 
 /**
  * Port that serves only the viewer page (/watch) and what it needs, so viewers never reach the
