@@ -98,6 +98,20 @@ function startServer() {
   const entry = path.join(dir, "server.js");
   if (!fs.existsSync(entry)) throw new Error(`The panel's server is missing (${entry}).`);
 
+  // The portable .exe unpacks to a new temp folder on every start, so OBS gets a copy of the
+  // live-bitrate script at a path that stays put. Refreshed each start to follow app updates.
+  const script = path.join(dir, "obs", "av-live-bitrate.lua");
+  if (process.env.AV_OBS_SCRIPT === undefined && fs.existsSync(script)) {
+    const stable = path.join(app.getPath("userData"), "obs", "av-live-bitrate.lua");
+    try {
+      fs.mkdirSync(path.dirname(stable), { recursive: true });
+      fs.copyFileSync(script, stable);
+      process.env.AV_OBS_SCRIPT = stable;
+    } catch {
+      // Keep the bundled path; it works until the next start.
+    }
+  }
+
   const logs = path.join(app.getPath("userData"), "logs");
   fs.mkdirSync(logs, { recursive: true });
   logFile = path.join(logs, "server.log");

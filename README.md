@@ -81,10 +81,11 @@ loginctl enable-linger "$USER"   # keep it running while logged out
 
 ### Windows
 
-Download MediaMTX's Windows zip and either add its folder to `PATH` or point
-`AV_MEDIAMTX_BIN` at `mediamtx.exe`. Windows has no standard place for MediaMTX's config, so
-set `AV_MEDIAMTX_CONFIG` to the `mediamtx.yml` from the zip; without it MediaMTX looks for
-`mediamtx.yml` in the panel's folder and otherwise runs on its built-in defaults. In PowerShell:
+Install MediaMTX with `winget install bluenviron.mediamtx` (FFmpeg for RTMP ingest:
+`winget install Gyan.FFmpeg`), or download its Windows zip and either add its folder to `PATH`
+or point `AV_MEDIAMTX_BIN` at `mediamtx.exe`. The panel uses the `mediamtx.yml` next to
+`mediamtx.exe`; set `AV_MEDIAMTX_CONFIG` to use another. Without any config file MediaMTX
+runs with an empty configuration that has no paths, and refuses every stream. In PowerShell:
 
 ```powershell
 $env:AV_MEDIAMTX_BIN = "C:\mediamtx\mediamtx.exe"
@@ -169,6 +170,7 @@ variables:
 | `AV_WEBRTC_INTERFACES` | *(the LAN interface, e.g. `wlo1`)* | Interfaces MediaMTX offers for WebRTC when the panel starts it (comma-separated; empty offers all) |
 | `AV_VIEWER_PORT` | `8080` | Port serving only the viewer page; `0` turns it off |
 | `AV_STATE_DIR` | `$XDG_STATE_HOME/av-control` (Windows: `%LOCALAPPDATA%\av-control`) | Where the automation switches are saved (`automation.json`), and the files shared with the OBS live-bitrate script |
+| `AV_OBS_SCRIPT` | `obs/av-live-bitrate.lua` in the panel's folder (desktop app: a copy in its data folder, e.g. `%APPDATA%\AV Control\obs`) | The live-bitrate script path the panel tells you to add to OBS |
 
 The commands themselves are defined in `src/lib/config.ts`.
 

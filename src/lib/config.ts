@@ -2,6 +2,7 @@
 //   whip (default): OBS --WHIP (H.264 + Opus)--> mediamtx /assembly --WHEP--> browser
 //   rtmp:           OBS --rtmp--> mediamtx /assembly --ffmpeg (AAC -> Opus)--> /assembly-webrtc --WHEP--> browser
 
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { lanInterface } from "./net";
@@ -40,11 +41,35 @@ export interface ProcSpec {
 const MEDIAMTX_BIN = process.env.AV_MEDIAMTX_BIN ?? "mediamtx";
 /** "C:\tools\mediamtx.exe" → "mediamtx". */
 const exeName = (bin: string) => (bin.split(/[\\/]/).pop() ?? bin).replace(/\.exe$/i, "");
+type Env = Record<string, string | undefined>;
+
+/** Full path of `bin` if it is on PATH (or is itself a path to an existing file). */
+export function findOnPath(bin: string, env: Env = process.env): string | null {
+  if (/[\\/]/.test(bin)) return existsSync(/*turbopackIgnore: true*/ bin) ? bin : null;
+  const exts = IS_WINDOWS ? ["", ...(env.PATHEXT ?? ".EXE").toLowerCase().split(";")] : [""];
+  for (const dir of (env.PATH ?? env.Path ?? "").split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const file = path.join(dir, bin + ext);
+      if (existsSync(/*turbopackIgnore: true*/ file)) return file;
+    }
+  }
+  return null;
+}
+
 /**
- * MediaMTX's config file. Windows has no standard place for it, so there MediaMTX is left to
- * find mediamtx.yml in its working directory (this app's folder) or use its built-in defaults.
+ * MediaMTX's config file. Windows has no standard place for it, so there it's the mediamtx.yml
+ * shipped next to mediamtx.exe (release zip, winget). Without any, MediaMTX would look in its
+ * working directory and otherwise run with an empty config, which has no paths: every publish
+ * and play is refused with "path is not configured".
  */
-const MEDIAMTX_CONFIG = process.env.AV_MEDIAMTX_CONFIG ?? (IS_WINDOWS ? null : "/etc/mediamtx/mediamtx.yml");
+export function defaultMediamtxConfig(bin: string, env: Env = process.env): string | null {
+  if (!IS_WINDOWS) return "/etc/mediamtx/mediamtx.yml";
+  const exe = findOnPath(bin, env);
+  const yml = exe && path.join(path.dirname(exe), "mediamtx.yml");
+  return yml && existsSync(/*turbopackIgnore: true*/ yml) ? yml : null;
+}
+
+const MEDIAMTX_CONFIG = process.env.AV_MEDIAMTX_CONFIG ?? defaultMediamtxConfig(MEDIAMTX_BIN);
 const RTSP = process.env.AV_RTSP_BASE ?? "rtsp://127.0.0.1:8554";
 export type Ingest = "whip" | "rtmp";
 /**

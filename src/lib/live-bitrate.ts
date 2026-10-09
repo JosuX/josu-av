@@ -12,8 +12,12 @@ const REQUEST_FILE = path.join(STATE_DIR, "obs-bitrate");
 const STATUS_FILE = path.join(STATE_DIR, "obs-bitrate-status");
 const STATUS_FRESH_MS = 10_000;
 
-/** Absolute path of the script, for the operator to add under Tools → Scripts. */
-export const SCRIPT_PATH = path.join(process.cwd(), "obs", "av-live-bitrate.lua");
+/**
+ * Absolute path of the script, for the operator to add under Tools → Scripts. The desktop app
+ * sets AV_OBS_SCRIPT to a copy outside its install folder, which the portable .exe replaces on
+ * every start.
+ */
+export const SCRIPT_PATH = process.env.AV_OBS_SCRIPT ?? path.join(process.cwd(), "obs", "av-live-bitrate.lua");
 
 export interface ScriptStatus {
   active: boolean;
