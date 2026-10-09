@@ -1,3 +1,11 @@
+# Flat node_modules: Next's standalone output (bundled into the Electron app) copies real
+# files instead of links back into this tree, which Windows can only make as absolute junctions.
+nodeLinker: hoisted
+
 ignoredBuiltDependencies:
+  - electron-winstaller
   - sharp
   - unrs-resolver
+
+onlyBuiltDependencies:
+  - electron

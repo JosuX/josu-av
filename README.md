@@ -18,9 +18,11 @@ copied through untouched, so OBS must send H.264 (not H.265).
 
 ## Requirements
 
-- Linux (system stats come from `/proc`)
-- Node.js 24+ and pnpm
-- `mediamtx`, `ffmpeg` and `pgrep` on `PATH`; `setpriv` (util-linux) is recommended, see below
+- Linux or Windows 10/11
+- Node.js 24+ and pnpm (Node 25+ no longer ships corepack: `npm install -g pnpm@10`)
+- `mediamtx` and `ffmpeg` on `PATH`
+  - Linux: also `pgrep`; `setpriv` (util-linux) is recommended, see below
+  - Windows: `winget install bluenviron.mediamtx Gyan.FFmpeg`
 - OBS 28+ (built-in obs-websocket v5) on the same host, with **Tools → WebSocket Server Settings → Enable WebSocket server** ticked
 
 ## Running
@@ -56,6 +58,22 @@ systemctl --user enable --now av-control
 loginctl enable-linger "$USER"   # keep it running while logged out
 ```
 
+## Windows desktop app
+
+On Windows the panel can also run as an Electron app. It bundles the Next.js server and
+starts it when the app opens, so nothing has to be left running in a terminal:
+
+```powershell
+pnpm electron:build    # dist-electron\AV Control Setup <version>.exe (installer)
+                       # dist-electron\AV Control-<version>-portable.exe
+```
+
+`pnpm build:standalone && pnpm electron` runs the same app without packaging it. The server
+still listens on `0.0.0.0:3000` (`AV_PORT` / `AV_HOST` change that), so phones and tablets on
+the LAN can use the panel while the app is open; Windows Firewall asks to allow AV Control and
+MediaMTX the first time. Closing the window stops the server along with the MediaMTX and FFmpeg
+it started. The server's output goes to `%APPDATA%\av-control\server.log`.
+
 ## Configuration
 
 Everything has a default that matches the original hand-run setup. Override with environment
@@ -64,7 +82,7 @@ variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AV_MEDIAMTX_BIN` | `mediamtx` | MediaMTX binary |
-| `AV_MEDIAMTX_CONFIG` | `/etc/mediamtx/mediamtx.yml` | MediaMTX config file |
+| `AV_MEDIAMTX_CONFIG` | `/etc/mediamtx/mediamtx.yml`; on Windows `mediamtx.yml` next to `mediamtx.exe` | MediaMTX config file |
 | `AV_MEDIAMTX_API` | `http://127.0.0.1:9997` | MediaMTX control API; the panel enables it via `MTX_API` when it starts MediaMTX |
 | `AV_MEDIAMTX_HLS` | `http://127.0.0.1:8888` | HLS server, used to probe readiness when the API is off |
 | `AV_WEBRTC_PORT` | `8889` | MediaMTX WebRTC port the browser connects to |
@@ -74,8 +92,8 @@ variables:
 | `AV_FFMPEG_BIN` | `ffmpeg` | FFmpeg binary |
 | `AV_OBS_WS_URL` | `ws://127.0.0.1:4455` | obs-websocket address |
 | `AV_OBS_WS_PASSWORD` | *(read from OBS's config)* | obs-websocket password |
-| `AV_OBS_CONFIG_DIR` | `$XDG_CONFIG_HOME/obs-studio` | OBS config directory (profiles, logs, websocket config) |
-| `AV_PDEATHSIG` | `1` | Set to `0` to spawn children directly instead of through `setpriv` |
+| `AV_OBS_CONFIG_DIR` | `$XDG_CONFIG_HOME/obs-studio`; on Windows `%APPDATA%obs-studio` | OBS config directory (profiles, logs, websocket config) |
+| `AV_PDEATHSIG` | `1` | Linux: set to `0` to spawn children directly instead of through `setpriv` |
 
 The commands themselves are defined in `src/lib/config.ts`.
 
@@ -87,9 +105,12 @@ The commands themselves are defined in `src/lib/config.ts`.
 - **Shutdown.** Children get SIGTERM when the server exits normally. They are spawned through
   `setpriv --pdeathsig TERM` as well, so the kernel stops them even if the server is killed
   outright. Without `setpriv` a hard kill leaves them running; the panel then shows them as
-  "running outside this app" and offers to stop them.
+  "running outside this app" and offers to stop them. Windows has neither signals nor
+  `setpriv`: children are terminated outright, and the desktop app ends the server's whole
+  process tree when it closes.
 - **External instances.** A MediaMTX or FFmpeg started from a terminal or systemd is detected
-  with `pgrep`, and the panel refuses to start a second one on the same ports.
+  with `pgrep` (on Windows, `tasklist` and the process command lines), and the panel refuses to
+  start a second one on the same ports.
 - **Bitrate.** OBS has no WebSocket request for encoder settings, so the panel writes the bitrate
   into the current profile's `streamEncoder.json` and restarts the stream, which makes OBS re-read
   the file. This needs OBS in **Advanced** output mode with CBR/VBR/ABR rate control. OBS rewrites

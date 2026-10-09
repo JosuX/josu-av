@@ -1,7 +1,8 @@
 import "server-only";
 import { spawn, execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { PDEATHSIG, PROCS, PROC_NAMES, type ProcName, type ProcSpec } from "./config";
+import path from "node:path";
+import { IS_WINDOWS, PDEATHSIG, PROCS, PROC_NAMES, type ProcName, type ProcSpec } from "./config";
 import { LOG_MAX_LINES } from "./shared";
 
 export type LogStream = "stdout" | "stderr" | "system";
@@ -133,6 +134,8 @@ export class ManagedProcess extends EventEmitter {
     const child = spawn(...spawnArgv(this.spec), {
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
+      // Console programs would otherwise each open a console window on Windows.
+      windowsHide: true,
     });
     this.child = child;
 
@@ -204,6 +207,50 @@ export class ManagedProcess extends EventEmitter {
   }
 }
 
+/** PIDs from `tasklist /FO CSV /NH` output ("image","pid",...); "INFO: No tasks" yields none. */
+export function parseTasklist(csv: string): number[] {
+  return Array.from(csv.matchAll(/^"[^"]*","(\d+)"/gm), (m) => Number(m[1]));
+}
+
+/** Parse "pid<TAB>command line" rows. */
+export function parsePidCommandLines(txt: string): { pid: number; cmd: string }[] {
+  return txt
+    .split(/\r?\n/)
+    .map((l) => /^(\d+)\t(.*)$/.exec(l))
+    .filter((m) => m !== null)
+    .map((m) => ({ pid: Number(m[1]), cmd: m[2] }));
+}
+
+function run(file: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(file, args, { windowsHide: true, timeout: 10_000 }, (_err, stdout) => resolve(stdout ?? ""));
+  });
+}
+
+/**
+ * Windows has no pgrep. tasklist is quick but has no command lines, so it narrows the search
+ * by image name and the much slower PowerShell CIM query only runs when it finds a process
+ * other than our own child.
+ */
+async function findWindowsPids(spec: ProcSpec, ownPid: number | undefined): Promise<number[]> {
+  const image = `${path.basename(spec.bin).replace(/\.exe$/i, "")}.exe`;
+  const candidates = parseTasklist(
+    await run("tasklist", ["/FI", `IMAGENAME eq ${image}`, "/FO", "CSV", "/NH"]),
+  ).filter((pid) => pid !== ownPid);
+  if (!candidates.length) return [];
+  const filter = candidates.map((pid) => `ProcessId=${pid}`).join(" OR ");
+  const out = await run("powershell.exe", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    `Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object { "$($_.ProcessId)\`t$($_.CommandLine)" }`,
+  ]);
+  const re = new RegExp(spec.externalPattern, "i");
+  return parsePidCommandLines(out)
+    .filter((p) => re.test(p.cmd.trim()))
+    .map((p) => p.pid);
+}
+
 class ProcessManager {
   readonly procs: Record<ProcName, ManagedProcess>;
   private pgrepCache = new Map<ProcName, { at: number; pids: Promise<number[]> }>();
@@ -214,7 +261,8 @@ class ProcessManager {
       ManagedProcess
     >;
     // Next turns SIGINT/SIGTERM into process.exit(), so this covers graceful shutdowns;
-    // the pdeathsig wrapper covers the server being killed outright.
+    // the pdeathsig wrapper covers the server being killed outright (on Windows, the Electron
+    // shell kills the server's whole process tree instead).
     const shutdown = () => {
       for (const p of Object.values(this.procs)) p.child?.kill("SIGTERM");
     };
@@ -229,11 +277,13 @@ class ProcessManager {
   private pgrep(name: ProcName): Promise<number[]> {
     const cached = this.pgrepCache.get(name);
     if (cached && Date.now() - cached.at < EXTERNAL_CACHE_MS) return cached.pids;
-    const pids = new Promise<number[]>((resolve) => {
-      execFile("pgrep", ["-f", PROCS[name].externalPattern], (_err, stdout) => {
-        resolve(stdout.split("\n").map((s) => Number(s.trim())).filter(Boolean));
-      });
-    });
+    const pids = IS_WINDOWS
+      ? findWindowsPids(PROCS[name], this.procs[name].child?.pid)
+      : new Promise<number[]>((resolve) => {
+          execFile("pgrep", ["-f", PROCS[name].externalPattern], (_err, stdout) => {
+            resolve(stdout.split("\n").map((s) => Number(s.trim())).filter(Boolean));
+          });
+        });
     this.pgrepCache.set(name, { at: Date.now(), pids });
     return pids;
   }

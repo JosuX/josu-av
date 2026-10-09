@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProcSpec } from "./config";
-import { ManagedProcess, splitLines, type ProcState } from "./procman";
+import { ManagedProcess, parsePidCommandLines, parseTasklist, splitLines, type ProcState } from "./procman";
 
 describe("splitLines", () => {
   it("carries an unterminated tail over to the next chunk", () => {
@@ -14,14 +14,15 @@ describe("splitLines", () => {
   });
 });
 
-function sh(script: string, over: Partial<ProcSpec> = {}): ProcSpec {
+/** A Node script as the managed command, so the tests run wherever the suite does (no sh on Windows). */
+function script(code: string, over: Partial<ProcSpec> = {}): ProcSpec {
   return {
     name: "ffmpeg",
     label: "test",
     shortLabel: "test",
     description: "",
-    bin: "sh",
-    args: ["-c", script],
+    bin: process.execPath,
+    args: ["-e", code],
     stopSignal: "SIGTERM",
     autoRestart: false,
     externalPattern: "^$",
@@ -55,7 +56,7 @@ describe("ManagedProcess", () => {
   });
 
   it("captures output and ends stopped after a clean exit", async () => {
-    const p = make(sh("echo hello; echo oops >&2"));
+    const p = make(script("console.log('hello'); console.error('oops')"));
     p.start();
     await waitFor(p, "running");
     await waitFor(p, "stopped");
@@ -69,14 +70,14 @@ describe("ManagedProcess", () => {
   });
 
   it("reports crashed on a non-zero exit", async () => {
-    const p = make(sh("exit 3"));
+    const p = make(script("process.exit(3)"));
     p.start();
     await waitFor(p, "crashed");
     expect(p.exitCode).toBe(3);
   });
 
   it("restarts on exit when autoRestart is set", async () => {
-    const p = make(sh("exit 1", { autoRestart: true }), 50);
+    const p = make(script("process.exit(1)", { autoRestart: true }), 50);
     p.start();
     await waitFor(p, "restarting");
     await waitFor(p, "running");
@@ -84,11 +85,26 @@ describe("ManagedProcess", () => {
   });
 
   it("stops a running process with its stop signal", async () => {
-    const p = make(sh("exec sleep 30"));
+    const p = make(script("setTimeout(() => {}, 30000)"));
     p.start();
     await waitFor(p, "running");
     await p.stop();
     expect(p.state).toBe("stopped");
     expect(p.exitSignal).toBe("SIGTERM");
+  });
+});
+
+describe("Windows process lookup parsing", () => {
+  it("reads PIDs from tasklist CSV output", () => {
+    const csv = `"ffmpeg.exe","4120","Console","1","52,344 K"\r\n"ffmpeg.exe","9001","Console","1","12,004 K"\r\n`;
+    expect(parseTasklist(csv)).toEqual([4120, 9001]);
+    expect(parseTasklist("INFO: No tasks are running which match the specified criteria.\r\n")).toEqual([]);
+  });
+
+  it("reads pid/command line rows", () => {
+    expect(parsePidCommandLines('12\t"C:\\mtx\\mediamtx.exe" C:\\mtx\\mediamtx.yml\r\n34\t\r\n')).toEqual([
+      { pid: 12, cmd: '"C:\\mtx\\mediamtx.exe" C:\\mtx\\mediamtx.yml' },
+      { pid: 34, cmd: "" },
+    ]);
   });
 });

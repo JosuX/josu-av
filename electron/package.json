@@ -1,0 +1,9 @@
+{
+  "name": "av-control",
+  "productName": "AV Control",
+  "version": "0.1.0",
+  "description": "Control panel for the assembly stream (MediaMTX, FFmpeg, OBS)",
+  "author": "JosuX",
+  "private": true,
+  "main": "main.cjs"
+}

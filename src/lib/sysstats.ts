@@ -1,6 +1,8 @@
 import "server-only";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
+import os from "node:os";
 import { STATS_HISTORY } from "./shared";
 
 export interface StatSample {
@@ -45,6 +47,43 @@ export function parseMeminfo(txt: string) {
   return { total, used: total - kb("MemAvailable") };
 }
 
+/**
+ * Received and sent byte totals across all interfaces, from `netstat -e` (Windows). The
+ * "Bytes" label is localised, so take the first row that is a label followed by two numbers.
+ */
+export function parseNetstatE(txt: string): { rx: number; tx: number } | null {
+  const m = /^\s*\S[^\d\r\n]*?\s+(\d+)\s+(\d+)\s*$/m.exec(txt);
+  return m ? { rx: Number(m[1]), tx: Number(m[2]) } : null;
+}
+
+interface Reading {
+  iface: string;
+  net: { rx: number; tx: number } | null;
+  mem: { total: number; used: number };
+}
+
+async function readLinux(): Promise<Reading> {
+  // Literal paths: a computed path makes Turbopack trace the whole project.
+  const [route, dev, meminfo] = await Promise.all([
+    readFile("/proc/net/route", "utf8"),
+    readFile("/proc/net/dev", "utf8"),
+    readFile("/proc/meminfo", "utf8"),
+  ]);
+  const iface = parseDefaultIface(route) ?? "lo";
+  return { iface, net: parseNetDev(dev, iface), mem: parseMeminfo(meminfo) };
+}
+
+async function readWindows(): Promise<Reading> {
+  const out = await new Promise<string>((resolve, reject) => {
+    execFile("netstat", ["-e"], { windowsHide: true, timeout: 5000 }, (err, stdout) =>
+      err ? reject(err) : resolve(stdout),
+    );
+  });
+  // os.freemem() is the "available" figure on Windows, matching MemAvailable on Linux.
+  const total = os.totalmem();
+  return { iface: "all", net: parseNetstatE(out), mem: { total, used: total - os.freemem() } };
+}
+
 class StatsSampler extends EventEmitter {
   history: StatSample[] = [];
   private timer: NodeJS.Timeout | null = null;
@@ -64,15 +103,7 @@ class StatsSampler extends EventEmitter {
 
   private async tick() {
     try {
-      // Literal paths: a computed path makes Turbopack trace the whole project.
-      const [route, dev, meminfo] = await Promise.all([
-        readFile("/proc/net/route", "utf8"),
-        readFile("/proc/net/dev", "utf8"),
-        readFile("/proc/meminfo", "utf8"),
-      ]);
-      const iface = parseDefaultIface(route) ?? "lo";
-      const net = parseNetDev(dev, iface);
-      const mem = parseMeminfo(meminfo);
+      const { iface, net, mem } = await (process.platform === "win32" ? readWindows() : readLinux());
       const now = Date.now();
       if (!net) return;
       const prev = this.prev;

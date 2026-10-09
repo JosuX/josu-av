@@ -1,0 +1,21 @@
+appId: com.josux.avcontrol
+productName: AV Control
+directories:
+  # The Electron app is just electron/ (no npm dependencies); the Next.js server is copied
+  # into resources/server by scripts/after-pack.cjs, so the project's node_modules stay out.
+  app: electron
+  output: dist-electron
+files:
+  - "**/*"
+  # electron/ has no dependencies; without this the builder falls back to the project's.
+  - "!**/node_modules/**"
+afterPack: scripts/after-pack.cjs
+win:
+  target:
+    - nsis
+    - portable
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
