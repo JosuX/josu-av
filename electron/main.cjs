@@ -15,6 +15,8 @@ const path = require("node:path");
 
 const WINDOWS = process.platform === "win32";
 const ICON = path.join(__dirname, "icon.png");
+/** 16 px, drawn for that size (scripts/make-icons.mjs); Electron picks tray@2x.png on HiDPI. */
+const TRAY_ICON = path.join(__dirname, "tray.png");
 
 /** The folder the user sees the app in: next to the portable .exe or the AppImage. */
 function appDir() {
@@ -204,7 +206,7 @@ function showWindow() {
 
 function createTray(attached) {
   try {
-    tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
+    tray = new Tray(nativeImage.createFromPath(TRAY_ICON));
   } catch {
     tray = null; // No tray on this desktop: closing the window quits.
     return;

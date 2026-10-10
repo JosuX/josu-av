@@ -22,8 +22,9 @@ export function viewerRoute(method: string, url: string): ViewerRoute {
   if (/\.\.|%2e|%2f|%5c|\\|\/\//i.test(path)) return "deny";
   if (method === "GET" || method === "HEAD") {
     if (path === "/") return "redirect";
-    if (path === "/watch" || path === "/api/watch" || path === "/api/events/watch" || path === "/favicon.ico")
-      return "forward";
+    if (path === "/watch" || path === "/api/watch" || path === "/api/events/watch") return "forward";
+    // The app icons (src/app/favicon.ico, icon.svg, apple-icon.png), which the page links to.
+    if (path === "/favicon.ico" || path === "/icon.svg" || path === "/apple-icon.png") return "forward";
     if (path.startsWith("/_next/static/")) return "forward";
     // Dev server only: fonts and the hot-reload channel.
     if (DEV && (path.startsWith("/__nextjs_font/") || DEV_HMR_PATHS.includes(path))) return "forward";

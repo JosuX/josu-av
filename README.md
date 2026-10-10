@@ -122,6 +122,10 @@ pnpm desktop:linux    # dist/AV-Control-<version>.AppImage
 pnpm desktop          # run it from the source tree
 ```
 
+The app icon is drawn in `electron/icon.svg` (and `electron/icon-small.svg` for 16–32 px).
+After changing either, run `node scripts/make-icons.mjs` to regenerate the `.exe`, window, tray
+and browser icons (it renders them with an installed Chrome or Edge).
+
 The build bundles MediaMTX (x64): it downloads the pinned release (`MEDIAMTX_VERSION` in
 `scripts/build-desktop.mjs`, or that environment variable) from GitHub, checks it against the
 release's checksums and caches it in `build/cache`. The app runs it with the release's own

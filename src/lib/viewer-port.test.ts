@@ -10,6 +10,9 @@ describe("viewerRoute", () => {
     expect(viewerRoute("GET", "/api/watch")).toBe("forward");
     expect(viewerRoute("GET", "/api/events/watch")).toBe("forward");
     expect(viewerRoute("POST", "/api/viewers")).toBe("forward");
+    expect(viewerRoute("GET", "/favicon.ico")).toBe("forward");
+    expect(viewerRoute("GET", "/icon.svg?1a2b3c")).toBe("forward");
+    expect(viewerRoute("GET", "/apple-icon.png?1a2b3c")).toBe("forward");
   });
 
   it("refuses the controls", () => {

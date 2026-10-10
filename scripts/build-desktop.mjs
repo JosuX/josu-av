@@ -139,7 +139,7 @@ console.log(`  mediamtx: ${hostMediamtx ? `v${MEDIAMTX_VERSION}` : "not bundled 
 
 const appDir = path.join(out, "app");
 mkdirSync(appDir, { recursive: true });
-for (const f of ["main.cjs", "server-host.cjs", "icon.png"]) cpSync(path.join(root, "electron", f), path.join(appDir, f));
+for (const f of ["main.cjs", "server-host.cjs", "icon.png", "tray.png", "tray@2x.png"]) cpSync(path.join(root, "electron", f), path.join(appDir, f));
 writeFileSync(
   path.join(appDir, "package.json"),
   JSON.stringify(
