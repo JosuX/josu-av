@@ -114,18 +114,23 @@ Differences from Linux:
 
 The panel also comes as a desktop app (Electron, in `electron/`): one program that runs the
 panel's server and shows the panel in its own window. On Windows it builds to a single portable
-`.exe` that needs no Node.js, pnpm or install.
+`.exe` that needs no Node.js, pnpm, MediaMTX or install: only OBS.
 
 ```bash
-pnpm desktop:win      # dist/AV-Control-<version>-portable.exe (builds on Linux too)
+pnpm desktop:win      # dist/AV-Control-<version>-portable.exe (builds on Linux too, with unzip)
 pnpm desktop:linux    # dist/AV-Control-<version>.AppImage
 pnpm desktop          # run it from the source tree
 ```
 
-To use the `.exe`, put it in a folder with `mediamtx.exe` and `mediamtx.yml` from MediaMTX's
-Windows zip (and `ffmpeg.exe` for RTMP ingest); the app uses them from there. Other settings
-are the variables in [Configuration](#configuration), set in the environment or as `KEY=value`
-lines in an `av-control.env` file in the same folder (or in `%APPDATA%\AV Control`), e.g.:
+The build bundles MediaMTX (x64): it downloads the pinned release (`MEDIAMTX_VERSION` in
+`scripts/build-desktop.mjs`, or that environment variable) from GitHub, checks it against the
+release's checksums and caches it in `build/cache`. The app runs it with the release's own
+`mediamtx.yml`. To use another MediaMTX or config, put `mediamtx.exe` and/or `mediamtx.yml`
+next to the `.exe`, or set `AV_MEDIAMTX_BIN` / `AV_MEDIAMTX_CONFIG` (`AV_MEDIAMTX_BIN=mediamtx`
+picks the one on `PATH`). RTMP ingest also needs `ffmpeg.exe`, next to the `.exe` or on `PATH`.
+Other settings are the variables in [Configuration](#configuration), set in the environment or
+as `KEY=value` lines in an `av-control.env` file in the same folder (or in
+`%APPDATA%\AV Control`), e.g.:
 
 ```ini
 PORT=3000

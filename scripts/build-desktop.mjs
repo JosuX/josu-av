@@ -1,5 +1,6 @@
 // Builds the desktop app (electron/): a standalone Next build of the panel, flattened so it
-// runs from any folder, plus the Electron shell, packaged with electron-builder.
+// runs from any folder, plus the Electron shell and a MediaMTX release, packaged with
+// electron-builder.
 //
 //   node scripts/build-desktop.mjs --stage-only     build/desktop only (run: electron build/desktop/app)
 //   node scripts/build-desktop.mjs --win portable   dist/AV-Control-<version>-portable.exe
@@ -8,6 +9,7 @@
 // --win/--linux and the targets after them go to electron-builder.
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -53,6 +55,53 @@ function hoist(fromModules, toModules) {
   return found.size;
 }
 
+/** MediaMTX release bundled into the app, so it runs without a separate install. */
+const MEDIAMTX_VERSION = process.env.MEDIAMTX_VERSION ?? "1.21.2";
+const MEDIAMTX_OS = { win32: "windows", linux: "linux" };
+
+/**
+ * The MediaMTX release for an Electron platform name (win32, linux; amd64 only), downloaded
+ * from GitHub, checked against the release's checksums and unpacked into build/cache, which
+ * later builds reuse. Null for platforms without a bundled MediaMTX.
+ */
+async function mediamtx(platform) {
+  const os = MEDIAMTX_OS[platform];
+  if (!os) return null;
+  const ext = platform === "win32" ? "zip" : "tar.gz";
+  const name = `mediamtx_v${MEDIAMTX_VERSION}_${os}_amd64`;
+  const dir = path.join(root, "build", "cache", name);
+  if (existsSync(path.join(dir, platform === "win32" ? "mediamtx.exe" : "mediamtx"))) return dir;
+
+  const base = `https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}`;
+  const get = async (url) => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  };
+  console.log(`  downloading ${name}.${ext}`);
+  const [archive, sums] = await Promise.all([get(`${base}/${name}.${ext}`), get(`${base}/checksums.sha256`)]);
+  // Lines are "<sha256> *<file>".
+  const expected = sums.toString().split("\n").find((l) => l.trim().endsWith(`${name}.${ext}`))?.split(/\s+/)[0];
+  const actual = createHash("sha256").update(archive).digest("hex");
+  if (expected !== actual) throw new Error(`${name}.${ext}: checksum ${actual} does not match the release's (${expected})`);
+
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${name}.${ext}`);
+  writeFileSync(file, archive);
+  // Windows' own tar (bsdtar) reads zips; Git for Windows' GNU tar, which may come first on PATH, doesn't.
+  const [tool, args] =
+    ext === "tar.gz"
+      ? ["tar", ["-xzf", file, "-C", dir]]
+      : process.platform === "win32"
+        ? [path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"), ["-xf", file, "-C", dir]]
+        : ["unzip", ["-q", "-o", file, "-d", dir]];
+  const r = spawnSync(tool, args, { stdio: "inherit" });
+  if (r.status !== 0) throw new Error(`could not unpack ${name}.${ext} with ${tool}`);
+  rmSync(file);
+  return dir;
+}
+
 const stageOnly = process.argv.includes("--stage-only");
 
 /** `--win portable --linux AppImage` → { win: ["portable"], linux: ["AppImage"] }. */
@@ -83,6 +132,10 @@ cpSync(path.join(root, ".next", "static"), path.join(server, ".next", "static"),
 cpSync(path.join(root, "public"), path.join(server, "public"), { recursive: true });
 cpSync(path.join(root, "obs"), path.join(server, "obs"), { recursive: true });
 console.log(`  server: ${count} packages`);
+// For `pnpm desktop`, which runs build/desktop/app on this machine.
+const hostMediamtx = await mediamtx(process.platform);
+if (hostMediamtx) cpSync(hostMediamtx, path.join(out, "mediamtx"), { recursive: true });
+console.log(`  mediamtx: ${hostMediamtx ? `v${MEDIAMTX_VERSION}` : "not bundled on this platform"}`);
 
 const appDir = path.join(out, "app");
 mkdirSync(appDir, { recursive: true });
@@ -126,8 +179,11 @@ await build({
     directories: { output: path.join(root, "dist"), buildResources: path.join(root, "electron") },
     asar: true,
     npmRebuild: false,
-    afterPack: async ({ appOutDir }) => {
+    afterPack: async ({ appOutDir, electronPlatformName }) => {
       cpSync(server, path.join(appOutDir, "resources", "server"), { recursive: true });
+      // The release for the platform being packaged, which may not be this machine's.
+      const mtx = await mediamtx(electronPlatformName);
+      if (mtx) cpSync(mtx, path.join(appOutDir, "resources", "mediamtx"), { recursive: true });
     },
     win: { target: "portable", icon: path.join(root, "electron", "icon.ico") },
     portable: { artifactName: "AV-Control-${version}-portable.exe" },

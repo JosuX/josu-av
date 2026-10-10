@@ -5,6 +5,7 @@
 // Settings are the usual AV_* environment variables. They can also go in an `av-control.env`
 // file (KEY=value lines) next to the app or in its user-data folder, and a mediamtx/ffmpeg
 // binary or mediamtx.yml placed next to the app is used when the variables don't say otherwise.
+// Failing those, the app runs the MediaMTX bundled with it.
 
 const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, shell, utilityProcess } = require("electron");
 const fs = require("node:fs");
@@ -56,6 +57,14 @@ function loadSettings() {
     const p = path.join(appDir(), name);
     // Only set when found: assigning undefined to process.env stores the string "undefined".
     if (process.env[key] === undefined && fs.existsSync(p)) process.env[key] = p;
+  }
+  // Otherwise the MediaMTX bundled with the app (scripts/build-desktop.mjs), with its own config
+  // unless a mediamtx.yml next to the app took over above. AV_MEDIAMTX_BIN=mediamtx uses PATH.
+  const bundled = path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, ".."), "mediamtx");
+  const bundledBin = path.join(bundled, `mediamtx${exe}`);
+  if (process.env.AV_MEDIAMTX_BIN === undefined && fs.existsSync(bundledBin)) {
+    process.env.AV_MEDIAMTX_BIN = bundledBin;
+    process.env.AV_MEDIAMTX_CONFIG ??= path.join(bundled, "mediamtx.yml");
   }
   return loaded;
 }
