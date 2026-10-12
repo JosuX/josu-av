@@ -33,3 +33,16 @@ test("the viewer port refuses every control page and endpoint", async () => {
   // ...while the same control page works on the panel's own port.
   expect(await rawStatus(E2E.panelPort, "GET", "/settings")).toBe(200);
 });
+
+test("the viewer port refuses oversized bodies", async ({ request }) => {
+  const res = await request.post(`${E2E.viewer}/api/viewers`, { data: "x".repeat(64 * 1024) });
+  expect(res.status()).toBe(413);
+});
+
+test("control endpoints refuse writes from other sites", async ({ request }) => {
+  const res = await request.post(`${E2E.panel}/api/process/mediamtx`, {
+    headers: { Origin: "https://evil.example" },
+    data: { action: "stop" },
+  });
+  expect(res.status()).toBe(403);
+});

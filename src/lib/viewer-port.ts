@@ -12,6 +12,8 @@ import { onShutdown } from "./shutdown";
 const DEV = process.env.NODE_ENV === "development";
 /** The dev server's hot-reload WebSocket; its client won't start the page without it. */
 const DEV_HMR_PATHS = ["/_next/hmr", "/_next/webpack-hmr"];
+/** Largest request body a viewer may send; a playback report is a few hundred bytes. */
+export const MAX_VIEWER_BODY = 16 * 1024;
 
 export type ViewerRoute = "forward" | "redirect" | "deny";
 
@@ -53,7 +55,14 @@ const handlers: Handlers = {
       res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
       return;
     }
-    const forwardedFor = [req.headers["x-forwarded-for"], req.socket.remoteAddress].filter(Boolean).join(", ");
+    if (Number(req.headers["content-length"] ?? 0) > MAX_VIEWER_BODY) {
+      res.writeHead(413, { "Content-Type": "text/plain", Connection: "close" }).end("Too large");
+      req.destroy();
+      return;
+    }
+    // Replace, not append to, any X-Forwarded-For the viewer sent, so the logs show the real
+    // address.
+    const forwardedFor = req.socket.remoteAddress ?? "";
     const upstream = http.request(
       {
         host: "127.0.0.1",
@@ -76,6 +85,15 @@ const handlers: Handlers = {
     // panel, or the panel can't shut down.
     res.on("close", () => {
       if (!res.writableFinished) upstream.destroy();
+    });
+    // Content-Length can be left out (chunked), so count the bytes as they arrive too.
+    let received = 0;
+    req.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+      if (received <= MAX_VIEWER_BODY) return;
+      upstream.destroy();
+      if (!res.headersSent) res.writeHead(413, { "Content-Type": "text/plain", Connection: "close" }).end("Too large");
+      req.destroy();
     });
     req.pipe(upstream);
   },
