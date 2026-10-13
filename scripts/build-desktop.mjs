@@ -3,7 +3,7 @@
 // electron-builder.
 //
 //   node scripts/build-desktop.mjs --stage-only     build/desktop only (run: electron build/desktop/app)
-//   node scripts/build-desktop.mjs --win portable   dist/AV-Control-<version>-portable.exe
+//   node scripts/build-desktop.mjs --win portable   dist/josu-av-<version>-portable.exe
 //   node scripts/build-desktop.mjs --linux AppImage
 //
 // --win/--linux and the targets after them go to electron-builder.
@@ -186,8 +186,8 @@ await build({
       if (mtx) cpSync(mtx, path.join(appOutDir, "resources", "mediamtx"), { recursive: true });
     },
     win: { target: "portable", icon: path.join(root, "electron", "icon.ico") },
-    portable: { artifactName: "AV-Control-${version}-portable.exe" },
+    portable: { artifactName: "josu-av-${version}-portable.exe" },
     linux: { target: "AppImage", icon: path.join(root, "electron", "icon.png"), category: "AudioVideo" },
-    appImage: { artifactName: "AV-Control-${version}.${ext}" },
+    appImage: { artifactName: "josu-av-${version}.${ext}" },
   },
 });

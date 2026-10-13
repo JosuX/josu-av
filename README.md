@@ -64,7 +64,7 @@ Description=AV Control panel
 After=network-online.target
 
 [Service]
-WorkingDirectory=%h/Projects/jw-av
+WorkingDirectory=%h/Projects/josu-av
 # systemd does not see your shell PATH: use the full path from `which pnpm`.
 ExecStart=/home/you/.local/share/mise/installs/node/25.2.1/bin/pnpm start
 Restart=on-failure
@@ -117,8 +117,8 @@ panel's server and shows the panel in its own window. On Windows it builds to a 
 `.exe` that needs no Node.js, pnpm, MediaMTX or install: only OBS.
 
 ```bash
-pnpm desktop:win      # dist/AV-Control-<version>-portable.exe (builds on Linux too, with unzip)
-pnpm desktop:linux    # dist/AV-Control-<version>.AppImage
+pnpm desktop:win      # dist/josu-av-<version>-portable.exe (builds on Linux too, with unzip)
+pnpm desktop:linux    # dist/josu-av-<version>.AppImage
 pnpm desktop          # run it from the source tree
 ```
 
